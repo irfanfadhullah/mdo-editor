@@ -1,0 +1,63 @@
+# ── Dependencies ──────────────────────────────────────────
+node_modules/
+gui-new/node_modules/
+*.lock
+package-lock.json
+
+# ── Build output ─────────────────────────────────────────
+gui-new/dist/
+gui-new/out/
+dist/
+out/
+
+# ── Electron ─────────────────────────────────────────────
+*.app
+*.dmg
+*.pkg
+*.snap
+
+# ── OS files ─────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# ── Editor / IDE ─────────────────────────────────────────
+*.swp
+*.swo
+*~
+\#*\#
+.\#*
+.idea/
+.vscode/
+*.sublime-*
+.project
+.classpath
+.settings/
+*.tmproj
+*.sublime-workspace
+
+# ── Logs ─────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+pnpm-debug.log*
+
+# ── Environment ──────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── Temp / Cache ─────────────────────────────────────────
+*.tmp
+*.temp
+.cache/
+__pycache__/
+*.py[cod]
+*$py.class

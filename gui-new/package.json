@@ -1,0 +1,39 @@
+{
+  "name": "mdo-viewer",
+  "version": "0.1.0",
+  "description": "Elegant Markdown & MDO document viewer",
+  "author": "MDO Viewer Team",
+  "homepage": "https://github.com/mdo-editor",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test:blocks": "node scripts/run-electron-smoke.js",
+    "build": "electron-builder",
+    "build:linux": "electron-builder --linux",
+    "build:mac": "electron-builder --mac"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "app.md-preview.mdo-viewer",
+    "productName": "MDO Viewer",
+    "files": [
+      "main.js",
+      "mdo-archive.js",
+      "preload.js",
+      "src/**/*"
+    ],
+    "linux": {
+      "target": ["deb", "AppImage"],
+      "category": "Office",
+      "icon": "build/icons",
+      "maintainer": "MDO Viewer Team",
+      "description": "Elegant Markdown & MDO document viewer with block editor"
+    }
+  }
+}

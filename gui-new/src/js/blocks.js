@@ -1,0 +1,1281 @@
+// ── MDO Viewer — Block Editor Engine ──────────────────────────
+
+if (!window.BlockEditor) {
+  window.BlockEditor = {};
+}
+
+const BlockEditor = window.BlockEditor;
+
+// ── Block Type Registry ───────────────────────────────────────
+
+BlockEditor.TYPES = [
+  { id: 'text',          label: 'Text',            icon: 'Aa',      category: 'basic',      shortcut: 't' },
+  { id: 'heading-1',     label: 'Heading 1',       icon: 'H1',     category: 'basic',      shortcut: 'h1' },
+  { id: 'heading-2',     label: 'Heading 2',       icon: 'H2',     category: 'basic',      shortcut: 'h2' },
+  { id: 'heading-3',     label: 'Heading 3',       icon: 'H3',     category: 'basic',      shortcut: 'h3' },
+  { id: 'page',          label: 'Page',            icon: '📄',      category: 'basic',      shortcut: 'page' },
+  { id: 'bulleted-list', label: 'Bulleted List',   icon: '•',      category: 'lists',      shortcut: 'ul' },
+  { id: 'numbered-list', label: 'Numbered List',   icon: '1.',     category: 'lists',      shortcut: 'ol' },
+  { id: 'todo-list',     label: 'To-do List',      icon: '☐',      category: 'lists',      shortcut: 'todo' },
+  { id: 'toggle-list',   label: 'Toggle',          icon: '▸',      category: 'lists',      shortcut: 'toggle' },
+  { id: 'quote',         label: 'Quote',           icon: '❝',      category: 'content',    shortcut: 'q' },
+  { id: 'callout',       label: 'Callout',         icon: '💡',     category: 'content',    shortcut: 'callout' },
+  { id: 'code',          label: 'Code Block',      icon: '⌨',      category: 'content',    shortcut: 'code' },
+  { id: 'divider',       label: 'Divider',         icon: '—',      category: 'content',    shortcut: 'div' },
+  { id: 'table',         label: 'Table',           icon: '⊞',      category: 'content',    shortcut: 'table' },
+  { id: 'columns',       label: 'Columns',         icon: '▦',      category: 'layout',     shortcut: 'cols' },
+  { id: 'image',         label: 'Image',           icon: '🖼',     category: 'media',      shortcut: 'img' },
+  { id: 'video',         label: 'Video',           icon: '🎬',     category: 'media',      shortcut: 'vid' },
+  { id: 'audio',         label: 'Audio',           icon: '🎵',     category: 'media',      shortcut: 'aud' },
+  { id: 'file',          label: 'File',            icon: '📎',     category: 'media',      shortcut: 'file' },
+  { id: 'embed',         label: 'Embed',           icon: '🌐',     category: 'media',      shortcut: 'embed' },
+  { id: 'bookmark',      label: 'Bookmark',        icon: '🔖',     category: 'media',      shortcut: 'link' },
+  { id: 'equation',      label: 'Equation',        icon: '𝑓',      category: 'technical',  shortcut: 'math' },
+  { id: 'pdf',           label: 'PDF',             icon: '📋',     category: 'media',      shortcut: 'pdf' },
+];
+
+// ── Unique IDs ────────────────────────────────────────────────
+
+let _idCounter = 0;
+BlockEditor.nextId = () => 'block-' + (++_idCounter) + '-' + Date.now().toString(36);
+
+// ── Block data helpers ───────────────────────────────────────
+
+function cloneMeta(meta) {
+  if (!meta || typeof meta !== 'object') return {};
+  try {
+    return JSON.parse(JSON.stringify(meta));
+  } catch (_) {
+    return { ...meta };
+  }
+}
+
+function fileNameFromPath(filePath) {
+  if (!filePath) return '';
+  return filePath.replace(/\\/g, '/').split('/').pop() || filePath;
+}
+
+function asFileUrl(filePath) {
+  if (!filePath) return '';
+  if (/^(file|https?|data|blob):/i.test(filePath)) return filePath;
+  return 'file://' + filePath;
+}
+
+BlockEditor.contentClassForType = function(type) {
+  const aliases = {
+    'heading-1': 'h1',
+    'heading-2': 'h2',
+    'heading-3': 'h3',
+    code: 'code-block',
+    table: 'table-block',
+    columns: 'columns-block',
+    image: 'image-block',
+    video: 'embed-block',
+    audio: 'embed-block',
+    embed: 'embed-block',
+    bookmark: 'bookmark-block',
+    file: 'file-block',
+    pdf: 'pdf-block file-block',
+    equation: 'equation-block',
+    page: 'page-block',
+  };
+  return [type, aliases[type]].filter(Boolean).join(' ');
+};
+
+BlockEditor.defaultBlockData = function(type = 'text', content = '', meta = {}) {
+  const block = {
+    id: BlockEditor.nextId(),
+    type: type || 'text',
+    content: content || '',
+    meta: cloneMeta(meta),
+  };
+
+  switch (block.type) {
+    case 'table':
+      if (!block.content) {
+        block.content = '| Header 1 | Header 2 |\n| --- | --- |\n| Cell | Cell |';
+      }
+      break;
+    case 'columns':
+      if (!block.meta.columns) {
+        block.meta.columns = block.content
+          ? block.content.split(/\n---col---\n/)
+          : ['Column 1', 'Column 2'];
+      }
+      block.content = block.meta.columns.join('\n---col---\n');
+      break;
+    case 'toggle-list':
+      if (!('children' in block.meta)) block.meta.children = '';
+      break;
+    case 'callout':
+      if (!block.meta.icon) block.meta.icon = '💡';
+      break;
+    case 'page':
+      if (!block.content) block.content = 'Untitled Page';
+      if (!block.meta.id) block.meta.id = BlockEditor.nextId();
+      break;
+    case 'divider':
+      block.content = '';
+      break;
+  }
+
+  return block;
+};
+
+BlockEditor.promptForBlockMeta = async function(type, currentContent = '') {
+  const meta = {};
+
+  if (['image', 'video', 'audio', 'pdf', 'file'].includes(type)) {
+    const paths = await window.mdoAPI?.openFile?.();
+    if (!paths || !paths.length) return null;
+    meta.src = asFileUrl(paths[0]);
+    if (!currentContent) meta._content = fileNameFromPath(paths[0]);
+    return meta;
+  }
+
+  if (type === 'embed') {
+    const url = prompt('Enter embed URL:');
+    if (!url) return null;
+    meta.url = url;
+    if (!currentContent) meta._content = url;
+    return meta;
+  }
+
+  if (type === 'bookmark') {
+    const url = prompt('Enter bookmark URL:');
+    if (!url) return null;
+    meta.url = url;
+    if (!currentContent) meta._content = url.replace(/^https?:\/\//, '');
+    return meta;
+  }
+
+  return meta;
+};
+
+BlockEditor.createBlock = async function(type = 'text', content = '', options = {}) {
+  let meta = {};
+  if (options.promptMeta !== false) {
+    meta = await BlockEditor.promptForBlockMeta(type, content);
+    if (meta === null) return null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(meta, '_content')) {
+    content = meta._content;
+    delete meta._content;
+  }
+
+  return BlockEditor.defaultBlockData(type, content, meta);
+};
+
+BlockEditor.storeBlockData = function(blockEl, block) {
+  blockEl.__blockData = {
+    id: block.id,
+    type: block.type,
+    content: block.content || '',
+    meta: cloneMeta(block.meta),
+  };
+};
+
+function storedBlockData(blockEl) {
+  const stored = blockEl.__blockData || {};
+  return {
+    content: stored.content || '',
+    meta: cloneMeta(stored.meta),
+  };
+}
+
+function isExternalMediaSrc(src) {
+  return /^(https?|data|blob):/i.test(src || '');
+}
+
+function localPathFromSrc(src) {
+  if (!src) return '';
+  if (src.startsWith('file://')) {
+    const raw = src.replace(/^file:\/\//i, '');
+    try { return decodeURIComponent(raw); } catch (_) { return raw; }
+  }
+  return src;
+}
+
+function assetEntryName(src, index) {
+  const original = fileNameFromPath(localPathFromSrc(src));
+  const fallback = 'asset-' + index;
+  const safe = (original || fallback)
+    .replace(/[<>:"\\|?*\x00-\x1F]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim() || fallback;
+  return 'assets/' + safe;
+}
+
+function uniqueAssetEntryName(src, used, index) {
+  const first = assetEntryName(src, index);
+  const extIndex = first.lastIndexOf('.');
+  const base = extIndex > 'assets/'.length ? first.slice(0, extIndex) : first;
+  const ext = extIndex > 'assets/'.length ? first.slice(extIndex) : '';
+  let candidate = first;
+  let suffix = 2;
+  while (used.has(candidate.toLowerCase())) {
+    candidate = base + '-' + suffix + ext;
+    suffix++;
+  }
+  used.add(candidate.toLowerCase());
+  return candidate;
+}
+
+BlockEditor.createMdoArchivePayload = function(blocks, options = {}) {
+  const archivePath = options.archivePath || null;
+  const usedAssets = new Set();
+  const assets = [];
+  let assetIndex = 1;
+
+  const packagedBlocks = (blocks || []).map(block => {
+    const copy = {
+      id: block.id,
+      type: block.type,
+      content: block.content || '',
+      meta: cloneMeta(block.meta),
+    };
+
+    if (!['image', 'video', 'audio', 'file', 'pdf'].includes(copy.type)) {
+      return copy;
+    }
+
+    const src = copy.meta?.src || '';
+    if (!src || isExternalMediaSrc(src)) return copy;
+
+    if (!copy.meta) copy.meta = {};
+
+    if (src.startsWith('file://') || src.startsWith('/')) {
+      const entryName = uniqueAssetEntryName(src, usedAssets, assetIndex++);
+      assets.push({
+        entryName,
+        sourcePath: localPathFromSrc(src),
+      });
+      copy.meta.src = entryName;
+      return copy;
+    }
+
+    const entryName = src.replace(/^\/+/, '');
+    usedAssets.add(entryName.toLowerCase());
+    if (archivePath) {
+      assets.push({
+        entryName,
+        archivePath,
+        sourceEntry: entryName,
+      });
+    }
+    copy.meta.src = entryName;
+    return copy;
+  });
+
+  const markdown = BlockEditor.serializeMarkdown(packagedBlocks);
+  const files = ['document.md', ...assets.map(asset => asset.entryName)];
+  const manifest = {
+    format: 'mdo',
+    version: '1.0',
+    title: options.title || 'Untitled',
+    document: 'document.md',
+    files,
+    assets: assets.map(asset => ({ path: asset.entryName })),
+  };
+
+  return { markdown, manifest, assets };
+};
+
+// ── Text offset helper for cursor split ──────────────────────
+function getTextOffset(root, node, offset) {
+  let pos = 0;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+  let n;
+  while ((n = walker.nextNode())) {
+    if (n === node) { pos += offset; break; }
+    pos += n.textContent.length;
+  }
+  return pos;
+}
+
+// ── Markdown → Blocks Parser ─────────────────────────────────
+
+BlockEditor.parseMarkdown = function(markdown) {
+  if (!markdown || !markdown.trim()) return [];
+  const lines = markdown.split('\n');
+  const blocks = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Empty line
+    if (/^\s*$/.test(line)) { i++; continue; }
+
+    // Divider
+    if (/^---\s*$/.test(line)) {
+      blocks.push({ id: BlockEditor.nextId(), type: 'divider', content: line });
+      i++; continue;
+    }
+
+    // Heading
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)/);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      if (level <= 3) {
+        blocks.push({ id: BlockEditor.nextId(), type: 'heading-' + level, content: headingMatch[2] });
+      } else {
+        blocks.push({ id: BlockEditor.nextId(), type: 'heading-3', content: headingMatch[2] });
+      }
+      i++; continue;
+    }
+
+    // Code block (fenced)
+    if (/^```/.test(line)) {
+      const lang = line.slice(3).trim();
+      let codeContent = '';
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i])) {
+        codeContent += (codeContent ? '\n' : '') + lines[i];
+        i++;
+      }
+      i++; // skip closing ```
+      blocks.push({ id: BlockEditor.nextId(), type: 'code', content: codeContent, meta: { language: lang } });
+      continue;
+    }
+
+    // Quote
+    if (/^>\s?/.test(line)) {
+      let quoteContent = line.replace(/^>\s?/, '');
+      i++;
+      while (i < lines.length && /^>\s?/.test(lines[i])) {
+        quoteContent += '\n' + lines[i].replace(/^>\s?/, '');
+        i++;
+      }
+      blocks.push({ id: BlockEditor.nextId(), type: 'quote', content: quoteContent });
+      continue;
+    }
+
+    // Callout
+    if (/^<!-- callout -->/.test(line)) {
+      i++;
+      let calloutContent = '';
+      while (i < lines.length && !/^<!--/.test(lines[i]) && !/^\s*$/.test(lines[i])) {
+        calloutContent += (calloutContent ? '\n' : '') + lines[i].replace(/^>\s?/, '');
+        i++;
+      }
+      if (i < lines.length && /^\s*$/.test(lines[i])) i++;
+      blocks.push({ id: BlockEditor.nextId(), type: 'callout', content: calloutContent });
+      continue;
+    }
+
+    // Columns
+    if (/^<!-- columns -->/.test(line)) {
+      i++;
+      let colContent = '';
+      while (i < lines.length && !/^<!--/.test(lines[i])) {
+        colContent += (colContent ? '\n' : '') + lines[i];
+        i++;
+      }
+      const cols = colContent.split(/<\/div>\s*<div class="column">/i).map(c =>
+        c.replace(/<div class="column">/i, '').replace(/<\/div>/i, '').trim()
+      );
+      blocks.push({ id: BlockEditor.nextId(), type: 'columns', content: cols.join('\n---col---\n'), meta: { columns: cols } });
+      continue;
+    }
+
+    // Bulleted list
+    if (/^[-*+]\s/.test(line)) {
+      let listText = line.replace(/^[-*+]\s/, '');
+      i++;
+      if (listText.includes('[ ] ') || listText.includes('[x] ')) {
+        const checked = listText.startsWith('[x] ');
+        blocks.push({ id: BlockEditor.nextId(), type: 'todo-list', content: listText.replace(/^\[[ x]\]\s?/, ''), meta: { checked } });
+      } else {
+        blocks.push({ id: BlockEditor.nextId(), type: 'bulleted-list', content: listText });
+      }
+      continue;
+    }
+
+    // Numbered list
+    if (/^\d+\.\s/.test(line)) {
+      const listText = line.replace(/^\d+\.\s/, '');
+      blocks.push({ id: BlockEditor.nextId(), type: 'numbered-list', content: listText });
+      i++; continue;
+    }
+
+    // Image (match entire line as image markdown)
+    const imgMatch = line.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
+    if (imgMatch) {
+      blocks.push({ id: BlockEditor.nextId(), type: 'image', content: imgMatch[1].trim(), meta: { src: imgMatch[2].trim() } });
+      i++; continue;
+    }
+
+    // Toggle
+    if (/^<!-- toggle -->/.test(line) || /^<details>/.test(line)) {
+      i++;
+      let summary = '', toggleContent = '';
+      if (lines[i] && /^<summary>/.test(lines[i])) {
+        summary = lines[i].replace(/<\/?summary>/g, '');
+        i++;
+      }
+      while (i < lines.length && !/^<\/details>/.test(lines[i])) {
+        toggleContent += (toggleContent ? '\n' : '') + lines[i];
+        i++;
+      }
+      if (i < lines.length) i++;
+      blocks.push({ id: BlockEditor.nextId(), type: 'toggle-list', content: summary, meta: { children: toggleContent } });
+      continue;
+    }
+
+    // Table
+    if (/^\|.+\|/.test(line) && i + 1 < lines.length && /^\|[-| ]+\|/.test(lines[i + 1])) {
+      const headerRow = line;
+      i++;
+      const sepRow = lines[i]; i++;
+      const bodyRows = [];
+      while (i < lines.length && /^\|.+\|/.test(lines[i])) {
+        bodyRows.push(lines[i]);
+        i++;
+      }
+      blocks.push({
+        id: BlockEditor.nextId(), type: 'table',
+        content: headerRow + '\n' + sepRow + '\n' + bodyRows.join('\n')
+      });
+      continue;
+    }
+
+    // Bookmark / Embed
+    const linkMatch = line.match(/^\[([^\]]+)\]\(([^)]+)\)\s*$/);
+    if (linkMatch) {
+      const url = linkMatch[2];
+      if (/\.(png|jpg|jpeg|webp|gif|svg|bmp)$/i.test(url)) {
+        blocks.push({ id: BlockEditor.nextId(), type: 'image', content: linkMatch[1], meta: { src: url } });
+      } else if (/\.(mp4|webm|mov|mkv)$/i.test(url)) {
+        blocks.push({ id: BlockEditor.nextId(), type: 'video', content: linkMatch[1], meta: { src: url } });
+      } else if (/\.(mp3|wav|ogg|flac)$/i.test(url)) {
+        blocks.push({ id: BlockEditor.nextId(), type: 'audio', content: linkMatch[1], meta: { src: url } });
+      } else if (/\.pdf$/i.test(url)) {
+        blocks.push({ id: BlockEditor.nextId(), type: 'pdf', content: linkMatch[1], meta: { src: url } });
+      } else if (/^https?:\/\//.test(url)) {
+        blocks.push({ id: BlockEditor.nextId(), type: 'bookmark', content: linkMatch[1], meta: { url } });
+      } else {
+        blocks.push({ id: BlockEditor.nextId(), type: 'file', content: linkMatch[1], meta: { src: url } });
+      }
+      i++; continue;
+    }
+
+    // Default: text/paragraph
+    let textContent = line;
+    i++;
+    while (i < lines.length && !/^\s*$/.test(lines[i]) && !/^(#{1,6}\s|```|>\s?|[-*+]\s|\d+\.\s|!\[|---|^\|.+|<!--|^\[.+\]\(.+\)\s*$)/.test(lines[i])) {
+      textContent += '\n' + lines[i];
+      i++;
+    }
+    blocks.push({ id: BlockEditor.nextId(), type: 'text', content: textContent });
+  }
+  return blocks;
+};
+
+// ── Blocks → Markdown Serializer ─────────────────────────────
+
+BlockEditor.serializeMarkdown = function(blocks) {
+  const lines = [];
+  for (const b of blocks) {
+    switch (b.type) {
+      case 'divider':
+        lines.push('---'); break;
+      case 'heading-1':
+        lines.push('# ' + b.content); break;
+      case 'heading-2':
+        lines.push('## ' + b.content); break;
+      case 'heading-3':
+        lines.push('### ' + b.content); break;
+      case 'bulleted-list':
+        lines.push('- ' + b.content); break;
+      case 'numbered-list':
+        lines.push('1. ' + b.content); break;
+      case 'todo-list':
+        lines.push('- [' + (b.meta?.checked ? 'x' : ' ') + '] ' + b.content); break;
+      case 'quote':
+        lines.push('> ' + b.content.replace(/\n/g, '\n> ')); break;
+      case 'callout':
+        lines.push('<!-- callout -->');
+        if (b.content) {
+          const parts = b.content.split('\n');
+          for (const p of parts) lines.push('> ' + p);
+        }
+        break;
+      case 'code':
+        lines.push('```' + (b.meta?.language || ''));
+        lines.push(b.content);
+        lines.push('```');
+        break;
+      case 'image':
+        lines.push('![' + (b.content || '') + '](' + (b.meta?.src || '') + ')');
+        break;
+      case 'toggle-list':
+        lines.push('<!-- toggle -->');
+        lines.push('<details>');
+        if (b.content) lines.push('<summary>' + b.content + '</summary>');
+        if (b.meta?.children) lines.push(b.meta.children);
+        lines.push('</details>');
+        break;
+      case 'table':
+        lines.push(b.content); break;
+      case 'columns':
+        lines.push('<!-- columns -->');
+        if (b.content) lines.push(b.content);
+        break;
+      case 'video':
+        lines.push('[' + (b.content || 'Video') + '](' + (b.meta?.src || '') + ')');
+        break;
+      case 'audio':
+        lines.push('[' + (b.content || 'Audio') + '](' + (b.meta?.src || '') + ')');
+        break;
+      case 'file':
+        lines.push('[' + (b.content || 'File') + '](' + (b.meta?.src || '') + ')');
+        break;
+      case 'bookmark':
+        lines.push('[' + (b.content || 'Link') + '](' + (b.meta?.url || '') + ')');
+        break;
+      case 'page':
+        lines.push('[' + b.content + '](page:' + (b.meta?.id || '') + ')');
+        break;
+      case 'embed':
+        lines.push('[Embed](' + (b.meta?.url || '') + ')');
+        break;
+      case 'equation':
+        lines.push('$$' + b.content + '$$');
+        break;
+      case 'pdf':
+        lines.push('[' + (b.content || 'PDF') + '](' + (b.meta?.src || '') + ')');
+        break;
+      default: // text
+        lines.push(b.content); break;
+    }
+    lines.push(''); // blank line after each block
+  }
+  return lines.join('\n');
+};
+
+// ── Media loading helpers ─────────────────────────────────────
+
+async function loadImageSrc(img, src) {
+  if (!src) return;
+  if (src.startsWith('data:')) { img.src = src; return; }
+  if (src.startsWith('http://') || src.startsWith('https://')) { img.src = src; return; }
+  if (window._archivePath && window.mdoAPI?.getArchiveDataUrl) {
+    const raw = src.startsWith('file://') ? src.replace('file://', '') : src;
+    const paths = [raw, decodeURIComponent(raw), raw.replace(/%20/g, ' '), raw.replace(/ /g, '%20')];
+    for (const p of paths) {
+      const result = await window.mdoAPI.getArchiveDataUrl(window._archivePath, p);
+      if (result.dataUrl) { img.src = result.dataUrl; return; }
+    }
+  }
+  if (window.mdoAPI?.getMediaDataUrl) {
+    const resolved = resolvePath(src);
+    const result = await window.mdoAPI.getMediaDataUrl(resolved);
+    if (result.dataUrl) img.src = result.dataUrl;
+    else img.src = resolveFileUrl(src);
+  } else {
+    img.src = resolveFileUrl(src);
+  }
+}
+
+async function loadMediaSrc(el, src) {
+  if (!src) return;
+  if (src.startsWith('data:')) { el.src = src; return; }
+  if (src.startsWith('http://') || src.startsWith('https://')) { el.src = src; return; }
+  if (window._archivePath && window.mdoAPI?.getArchiveDataUrl) {
+    const raw = src.startsWith('file://') ? src.replace('file://', '') : src;
+    const paths = [raw, decodeURIComponent(raw), raw.replace(/%20/g, ' '), raw.replace(/ /g, '%20')];
+    for (const p of paths) {
+      const result = await window.mdoAPI.getArchiveDataUrl(window._archivePath, p);
+      if (result.dataUrl) { el.src = result.dataUrl; return; }
+    }
+  }
+  if (window.mdoAPI?.getMediaDataUrl) {
+    const resolved = resolvePath(src);
+    const result = await window.mdoAPI.getMediaDataUrl(resolved);
+    if (result.dataUrl) el.src = result.dataUrl;
+    else el.src = resolveFileUrl(src);
+  } else {
+    el.src = resolveFileUrl(src);
+  }
+}
+
+function resolvePath(src) {
+  if (src.startsWith('file://')) return src.replace('file://', '');
+  if (src.startsWith('/')) return src;
+  // Relative path: resolve against the current file's directory
+  if (window._currentFileDir) {
+    return window._currentFileDir + '/' + src;
+  }
+  return src;
+}
+
+function resolveFileUrl(src) {
+  if (src.startsWith('file://')) return src;
+  if (src.startsWith('/')) return 'file://' + src;
+  return src;
+}
+
+// ── Block → DOM Renderer ─────────────────────────────────────
+
+BlockEditor.renderBlock = function(block, isEditable = true) {
+  const blockId = block.id || BlockEditor.nextId();
+  block = BlockEditor.defaultBlockData(block.type, block.content, block.meta);
+  block.id = blockId;
+  const el = document.createElement('div');
+  el.className = 'block';
+  el.dataset.blockId = block.id;
+  el.dataset.blockType = block.type;
+  BlockEditor.storeBlockData(el, block);
+
+  const handle = document.createElement('div');
+  handle.className = 'block-handle';
+  handle.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24"><circle cx="9" cy="5" r="1.5" fill="currentColor"/><circle cx="15" cy="5" r="1.5" fill="currentColor"/><circle cx="9" cy="12" r="1.5" fill="currentColor"/><circle cx="15" cy="12" r="1.5" fill="currentColor"/><circle cx="9" cy="19" r="1.5" fill="currentColor"/><circle cx="15" cy="19" r="1.5" fill="currentColor"/></svg>';
+  el.appendChild(handle);
+
+  const content = document.createElement('div');
+  content.className = 'block-content ' + BlockEditor.contentClassForType(block.type);
+  const ed = isEditable;
+
+  switch (block.type) {
+    case 'text':
+      content.contentEditable = 'true';
+      content.dataset.placeholder = 'Type / for commands…';
+      content.setAttribute('spellcheck', 'true');
+      content.innerHTML = renderInlineContent(block.content);
+      break;
+
+    case 'heading-1':
+    case 'heading-2':
+    case 'heading-3':
+      content.contentEditable = 'true';
+      content.dataset.placeholder = block.type.replace('-', ' ') + '…';
+      content.setAttribute('spellcheck', 'true');
+      content.innerHTML = renderInlineContent(block.content);
+      break;
+
+    case 'bulleted-list':
+    case 'numbered-list':
+    case 'todo-list':
+      content.contentEditable = 'true';
+      content.dataset.placeholder = 'List item…';
+      content.setAttribute('spellcheck', 'true');
+      if (block.type === 'todo-list') {
+        const cb = document.createElement('span');
+        cb.className = 'todo-checkbox' + (block.meta?.checked ? ' checked' : '');
+        cb.addEventListener('click', (e) => {
+          e.stopPropagation();
+          block.meta = block.meta || {};
+          block.meta.checked = !block.meta.checked;
+          cb.classList.toggle('checked');
+          content.classList.toggle('checked');
+          content.closest('.block-editor')?.dispatchEvent(new CustomEvent('block-changed'));
+        });
+        content.appendChild(cb);
+      }
+      content.insertAdjacentHTML('beforeend', renderInlineContent(block.content));
+      if (block.type === 'todo-list' && block.meta?.checked) {
+        content.classList.add('checked');
+      }
+      break;
+
+    case 'quote':
+      content.contentEditable = 'true';
+      content.dataset.placeholder = 'Quote…';
+      content.setAttribute('spellcheck', 'true');
+      content.innerHTML = renderInlineContent(block.content);
+      break;
+
+    case 'callout':
+      {
+        const icon = document.createElement('span');
+        icon.className = 'callout-icon';
+        icon.textContent = block.meta?.icon || '💡';
+        icon.contentEditable = 'false';
+        const body = document.createElement('div');
+        body.className = 'callout-body';
+        body.contentEditable = 'true';
+        body.dataset.placeholder = 'Callout content…';
+        body.setAttribute('spellcheck', 'true');
+        body.innerHTML = renderInlineContent(block.content);
+        content.appendChild(icon);
+        content.appendChild(body);
+      }
+      break;
+
+    case 'code':
+      content.contentEditable = 'true';
+      content.setAttribute('spellcheck', 'false');
+      content.textContent = block.content;
+      if (block.meta?.language) {
+        const label = document.createElement('span');
+        label.className = 'code-lang-label';
+        label.textContent = block.meta.language;
+        label.contentEditable = 'false';
+        content.appendChild(label);
+      }
+      break;
+
+    case 'divider':
+      content.contentEditable = 'false';
+      break;
+
+    case 'image':
+      content.contentEditable = 'false';
+      if (block.meta?.src) {
+        const img = document.createElement('img');
+        img.alt = block.content || '';
+        img.dataset.src = block.meta.src;
+        img.style.width = '100%';
+        img.style.height = 'auto';
+        img.style.maxHeight = '600px';
+        img.style.objectFit = 'contain';
+        img.style.display = 'block';
+        img.style.borderRadius = 'var(--radius-md)';
+        content.appendChild(img);
+        const caption = document.createElement('span');
+        caption.className = 'image-caption';
+        caption.contentEditable = 'true';
+        caption.dataset.placeholder = 'Add a caption…';
+        caption.setAttribute('spellcheck', 'true');
+        caption.textContent = block.content || '';
+        content.appendChild(caption);
+        loadImageSrc(img, block.meta.src);
+      }
+      break;
+
+    case 'table':
+      content.contentEditable = 'false';
+      if (block.content) {
+        const table = document.createElement('table');
+        table.className = 'block-table';
+        const rows = block.content.split('\n').filter(r => r.trim());
+        for (let ri = 0; ri < rows.length; ri++) {
+          const tr = document.createElement('tr');
+          const cells = rows[ri].split('|').filter(c => c.trim());
+          if (ri === 1 && /^[-| ]+$/.test(cells.join(''))) continue; // separator
+          for (const cell of cells) {
+            const td = document.createElement(ri === 0 ? 'th' : 'td');
+            td.textContent = cell.trim();
+            td.contentEditable = 'true';
+            td.setAttribute('spellcheck', 'true');
+            tr.appendChild(td);
+          }
+          table.appendChild(tr);
+        }
+        content.appendChild(table);
+      }
+      break;
+
+    case 'columns':
+      content.contentEditable = 'false';
+      {
+        const cols = block.meta?.columns || [block.content || 'Column 1', 'Column 2'];
+        for (const col of cols) {
+          const colDiv = document.createElement('div');
+          colDiv.className = 'column-block';
+          colDiv.contentEditable = 'true';
+          colDiv.dataset.placeholder = 'Column content…';
+          colDiv.setAttribute('spellcheck', 'true');
+          colDiv.textContent = col;
+          content.appendChild(colDiv);
+        }
+      }
+      break;
+
+    case 'toggle-list':
+      {
+        const arrow = document.createElement('span');
+        arrow.className = 'toggle-arrow';
+        arrow.textContent = '▶';
+        arrow.contentEditable = 'false';
+        const toggleContent = document.createElement('div');
+        toggleContent.className = 'toggle-content';
+        toggleContent.contentEditable = 'true';
+        toggleContent.dataset.placeholder = 'Toggle title…';
+        toggleContent.setAttribute('spellcheck', 'true');
+        toggleContent.textContent = block.content || 'Toggle';
+        content.appendChild(arrow);
+        content.appendChild(toggleContent);
+        if (block.meta?.children) {
+          const childDiv = document.createElement('div');
+          childDiv.className = 'toggle-children';
+          childDiv.textContent = block.meta.children;
+          childDiv.contentEditable = 'true';
+          content.appendChild(childDiv);
+        }
+        arrow.addEventListener('click', () => {
+          arrow.classList.toggle('open');
+          const cd = content.querySelector('.toggle-children');
+          if (cd) cd.classList.toggle('open');
+        });
+      }
+      break;
+
+    case 'video':
+      content.contentEditable = 'false';
+      if (block.meta?.src) {
+        const video = document.createElement('video');
+        video.controls = true;
+        video.dataset.src = block.meta.src;
+        video.style.maxWidth = '100%';
+        video.style.maxHeight = '480px';
+        video.style.borderRadius = 'var(--radius-md)';
+        content.appendChild(video);
+        loadMediaSrc(video, block.meta.src);
+      }
+      break;
+
+    case 'audio':
+      content.contentEditable = 'false';
+      if (block.meta?.src) {
+        const audio = document.createElement('audio');
+        audio.controls = true;
+        audio.dataset.src = block.meta.src;
+        audio.style.width = '100%';
+        content.appendChild(audio);
+        loadMediaSrc(audio, block.meta.src);
+      }
+      break;
+
+    case 'file':
+      content.contentEditable = 'false';
+      {
+        const icon = document.createElement('span');
+        icon.className = 'file-icon';
+        icon.textContent = '📎';
+        const info = document.createElement('div');
+        const name = document.createElement('div');
+        name.className = 'file-name';
+        name.textContent = block.content || (block.meta?.src || 'File');
+        info.appendChild(name);
+        const size = document.createElement('div');
+        size.className = 'file-size';
+        size.textContent = block.meta?.size || '';
+        info.appendChild(size);
+        content.appendChild(icon);
+        content.appendChild(info);
+        content.addEventListener('click', () => {
+          if (block.meta?.src) window.mdoAPI?.openInBrowser(asFileUrl(block.meta.src));
+        });
+      }
+      break;
+
+    case 'bookmark':
+      content.contentEditable = 'false';
+      {
+        const thumb = document.createElement('div');
+        thumb.className = 'bookmark-thumb';
+        const info = document.createElement('div');
+        info.className = 'bookmark-info';
+        const title = document.createElement('div');
+        title.className = 'bookmark-title';
+        title.textContent = block.content || 'Bookmark';
+        const desc = document.createElement('div');
+        desc.className = 'bookmark-desc';
+        desc.textContent = block.meta?.description || block.meta?.url || '';
+        const urlDiv = document.createElement('div');
+        urlDiv.className = 'bookmark-url';
+        urlDiv.textContent = block.meta?.url || '';
+        info.appendChild(title);
+        info.appendChild(desc);
+        info.appendChild(urlDiv);
+        content.appendChild(thumb);
+        content.appendChild(info);
+        content.addEventListener('click', () => {
+          if (block.meta?.url) window.mdoAPI?.openInBrowser(block.meta.url);
+        });
+      }
+      break;
+
+    case 'embed':
+      content.contentEditable = 'false';
+      if (block.meta?.url) {
+        const iframe = document.createElement('iframe');
+        iframe.src = block.meta.url;
+        iframe.sandbox = 'allow-scripts allow-same-origin';
+        content.appendChild(iframe);
+      }
+      break;
+
+    case 'equation':
+      content.contentEditable = 'true';
+      content.dataset.placeholder = 'Type LaTeX equation…';
+      content.setAttribute('spellcheck', 'false');
+      content.textContent = block.content || '';
+      break;
+
+    case 'page':
+      content.contentEditable = 'false';
+      {
+        const icon = document.createElement('span');
+        icon.className = 'page-icon';
+        icon.textContent = '📄';
+        content.appendChild(icon);
+        const text = document.createTextNode(block.content || 'Untitled Page');
+        content.appendChild(text);
+        content.addEventListener('click', () => {
+          if (block.meta?.id) alert('Navigate to page: ' + block.meta.id);
+        });
+      }
+      break;
+
+    case 'pdf':
+      content.contentEditable = 'false';
+      if (block.meta?.src) {
+        const iframe = document.createElement('iframe');
+        iframe.src = block.meta.src;
+        iframe.dataset.src = block.meta.src;
+        iframe.style.width = '100%';
+        iframe.style.minHeight = '500px';
+        iframe.style.border = '1px solid var(--border)';
+        iframe.style.borderRadius = 'var(--radius-md)';
+        content.appendChild(iframe);
+      }
+      break;
+
+    default:
+      content.contentEditable = 'true';
+      content.dataset.placeholder = 'Type / for commands…';
+      content.setAttribute('spellcheck', 'true');
+      content.textContent = block.content || '';
+  }
+
+  // Apply edit mode to editable content
+  if (!isEditable) {
+    // Make everything read-only
+    content.contentEditable = 'false';
+    content.querySelectorAll('[contenteditable="true"]').forEach(el => el.contentEditable = 'false');
+  } else if (['image', 'video', 'audio', 'file', 'bookmark', 'embed', 'page', 'pdf', 'divider', 'table', 'columns'].includes(block.type)) {
+    // Keep the visual container itself read-only while allowing editable children
+    // such as image captions, table cells, and column bodies in edit mode.
+    content.contentEditable = 'false';
+  }
+
+  // Link click handler (Ctrl+click to open in browser)
+  content.querySelectorAll('a').forEach(a => {
+    a.addEventListener('click', (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        if (window.mdoAPI?.openInBrowser) window.mdoAPI.openInBrowser(a.href);
+      }
+    });
+  });
+
+  el.appendChild(content);
+  return el;
+};
+
+// ── Inline Content Rendering ──────────────────────────────────
+
+function renderInlineContent(text) {
+  if (!text) return '';
+  let html = text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    // Inline math $...$ → styled span
+    .replace(/\$\$?(.+?)\$\$?/g, '<code class="inline-code" style="font-style:italic;">$1</code>')
+    // Inline code `...`
+    .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
+    // Bold + italic ***...***
+    .replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>')
+    // Bold **...**
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    // Italic *...*
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    // Strikethrough ~~...~~
+    .replace(/~~([^~]+)~~/g, '<del>$1</del>')
+    // Images ![alt](url) — inline
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (m, alt, url) => {
+      const src = url.trim();
+      return `<img src="${src}" alt="${alt}" style="max-height:1.5em;max-width:100%;vertical-align:middle;border-radius:3px;">`;
+    })
+    // Links [text](url)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/\n/g, '<br>');
+  return html;
+}
+
+// ── Extract block content from DOM ────────────────────────────
+
+BlockEditor.readBlock = function(blockEl) {
+  const blockId = blockEl.dataset.blockId;
+  const type = blockEl.dataset.blockType;
+  const contentEl = blockEl.querySelector('.block-content');
+  if (!contentEl) return null;
+
+  const stored = storedBlockData(blockEl);
+  const block = { id: blockId, type, content: stored.content || '', meta: stored.meta };
+
+  switch (type) {
+    case 'text':
+    case 'heading-1':
+    case 'heading-2':
+    case 'heading-3':
+    case 'bulleted-list':
+    case 'numbered-list':
+      block.content = contentEl.innerText.trim();
+      break;
+
+    case 'todo-list':
+      {
+        const cb = contentEl.querySelector('.todo-checkbox');
+        block.meta = block.meta || {};
+        block.meta.checked = cb?.classList.contains('checked') || false;
+        block.content = contentEl.innerText.trim();
+      }
+      break;
+
+    case 'quote':
+      block.content = contentEl.innerText.trim();
+      break;
+
+    case 'callout':
+      {
+        const body = contentEl.querySelector('.callout-body');
+        block.content = body ? body.innerText.trim() : '';
+        const icon = contentEl.querySelector('.callout-icon');
+        block.meta = block.meta || {};
+        block.meta.icon = icon ? icon.textContent : '💡';
+      }
+      break;
+
+    case 'code':
+      {
+        const clone = contentEl.cloneNode(true);
+        clone.querySelectorAll('.code-lang-label').forEach(label => label.remove());
+        block.content = clone.innerText || clone.textContent || '';
+      }
+      block.meta = block.meta || {};
+      const label = contentEl.querySelector('.code-lang-label');
+      block.meta.language = label ? label.textContent : (block.meta.language || '');
+      break;
+
+    case 'divider':
+      block.content = '---';
+      break;
+
+    case 'image':
+      {
+        const img = contentEl.querySelector('img');
+        const caption = contentEl.querySelector('.image-caption');
+        block.meta = block.meta || {};
+        block.meta.src = img ? (img.dataset.src || block.meta.src || img.getAttribute('src') || '') : (block.meta.src || '');
+        block.content = caption ? caption.textContent.trim() : (block.content || '');
+      }
+      break;
+
+    case 'table':
+      {
+        const rows = [];
+        const table = contentEl.querySelector('table');
+        if (table) {
+          const trs = table.querySelectorAll('tr');
+          for (const tr of trs) {
+            const cells = [];
+            const tds = tr.querySelectorAll('th, td');
+            for (const td of tds) cells.push(td.textContent.trim());
+            rows.push('| ' + cells.join(' | ') + ' |');
+          }
+          if (rows.length > 1) {
+            const cols = rows[1].split('|').filter(c => c.trim()).length;
+            rows.splice(1, 0, '|' + Array(cols).fill(' --- ').join('|') + '|');
+          }
+        }
+        block.content = rows.join('\n');
+      }
+      break;
+
+    case 'columns':
+      {
+        const colDivs = contentEl.querySelectorAll('.column-block');
+        const cols = [];
+        for (const cd of colDivs) cols.push(cd.textContent.trim());
+        block.meta = { columns: cols };
+        block.content = cols.join('\n---col---\n');
+      }
+      break;
+
+    case 'toggle-list':
+      {
+        const tc = contentEl.querySelector('.toggle-content');
+        block.content = tc ? tc.textContent.trim() : '';
+        const childDiv = contentEl.querySelector('.toggle-children');
+        block.meta = block.meta || {};
+        block.meta.children = childDiv ? childDiv.textContent.trim() : '';
+      }
+      break;
+
+    case 'video':
+    case 'audio':
+    case 'file':
+    case 'embed':
+    case 'bookmark':
+    case 'pdf':
+    case 'page':
+      // These are read-only blocks; preserve existing meta/content
+      break;
+
+    case 'equation':
+      block.content = contentEl.innerText.trim();
+      break;
+
+    default:
+      block.content = contentEl.textContent.trim();
+  }
+
+  return block;
+};
+
+// ── Slash Menu ────────────────────────────────────────────────
+
+let slashMenu = null;
+let slashTarget = null;
+let slashSelected = -1;
+
+BlockEditor.createSlashMenu = function() {
+  if (slashMenu) return slashMenu;
+  slashMenu = document.createElement('div');
+  slashMenu.className = 'slash-menu';
+  slashMenu.style.display = 'none';
+  document.body.appendChild(slashMenu);
+  return slashMenu;
+};
+
+BlockEditor.showSlashMenu = function(targetBlockEl, filterText) {
+  const menu = BlockEditor.createSlashMenu();
+  menu.innerHTML = '';
+
+  const filter = (filterText || '').toLowerCase();
+  const categories = { basic: 'Basic', lists: 'Lists', content: 'Content', media: 'Media & Embeds', layout: 'Layout', technical: 'Technical' };
+
+  let items = BlockEditor.TYPES.filter(t =>
+    t.label.toLowerCase().includes(filter) || t.id.toLowerCase().includes(filter) ||
+    (t.shortcut && t.shortcut.toLowerCase().includes(filter))
+  );
+
+  if (items.length === 0) {
+    menu.style.display = 'none';
+    return;
+  }
+
+  slashSelected = -1;
+  const grouped = {};
+  for (const t of items) {
+    if (!grouped[t.category]) grouped[t.category] = [];
+    grouped[t.category].push(t);
+  }
+
+  for (const [cat, types] of Object.entries(grouped)) {
+    const group = document.createElement('div');
+    group.className = 'slash-menu-group';
+    const label = document.createElement('div');
+    label.className = 'slash-menu-label';
+    label.textContent = categories[cat] || cat;
+    group.appendChild(label);
+
+    for (const t of types) {
+      const item = document.createElement('div');
+      item.className = 'slash-menu-item';
+      item.innerHTML = `
+        <span class="item-icon">${t.icon}</span>
+        <span class="item-label">${t.label}</span>
+        ${t.shortcut ? '<span class="item-shortcut">/' + t.shortcut + '</span>' : ''}
+      `;
+      item.addEventListener('click', async () => {
+        BlockEditor.hideSlashMenu();
+        await BlockEditor.applyBlockType(targetBlockEl, t.id);
+      });
+      group.appendChild(item);
+    }
+    menu.appendChild(group);
+  }
+
+  const rect = targetBlockEl.getBoundingClientRect();
+  menu.style.display = 'block';
+  menu.style.top = Math.min(rect.bottom + 4, window.innerHeight - 400) + 'px';
+  menu.style.left = Math.min(rect.left, window.innerWidth - 280) + 'px';
+  slashTarget = targetBlockEl;
+};
+
+BlockEditor.hideSlashMenu = function() {
+  if (slashMenu) {
+    slashMenu.style.display = 'none';
+  }
+  slashTarget = null;
+  slashSelected = -1;
+};
+
+BlockEditor.applyBlockType = async function(blockEl, type) {
+  const typeDef = BlockEditor.TYPES.find(t => t.id === type);
+  if (!typeDef) return;
+
+  const oldText = blockEl.querySelector('.block-content')?.textContent || '';
+  let newContent = oldText.trim().startsWith('/') ? '' : oldText;
+  let meta = await BlockEditor.promptForBlockMeta(type, newContent);
+  if (meta === null) return;
+  if (Object.prototype.hasOwnProperty.call(meta, '_content')) {
+    newContent = meta._content;
+    delete meta._content;
+  }
+
+  blockEl.dataset.blockType = type;
+  const contentEl = blockEl.querySelector('.block-content');
+  if (contentEl) {
+    blockEl.innerHTML = '';
+    const handle = document.createElement('div');
+    handle.className = 'block-handle';
+    handle.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24"><circle cx="9" cy="5" r="1.5" fill="currentColor"/><circle cx="15" cy="5" r="1.5" fill="currentColor"/><circle cx="9" cy="12" r="1.5" fill="currentColor"/><circle cx="15" cy="12" r="1.5" fill="currentColor"/><circle cx="9" cy="19" r="1.5" fill="currentColor"/><circle cx="15" cy="19" r="1.5" fill="currentColor"/></svg>';
+    blockEl.appendChild(handle);
+    const tempBlock = BlockEditor.defaultBlockData(type, newContent, meta);
+    tempBlock.id = blockEl.dataset.blockId;
+    BlockEditor.storeBlockData(blockEl, tempBlock);
+    const renderedContent = BlockEditor.renderBlock(tempBlock).querySelector('.block-content');
+    blockEl.appendChild(renderedContent);
+    const focusTarget = renderedContent.contentEditable === 'true'
+      ? renderedContent
+      : renderedContent.querySelector('[contenteditable="true"]');
+    if (focusTarget) focusTarget.focus();
+    blockEl.dispatchEvent(new CustomEvent('block-type-applied', {
+      bubbles: true,
+      detail: { blockId: tempBlock.id, block: tempBlock },
+    }));
+  }
+  blockEl.closest('.block-editor')?.dispatchEvent(new CustomEvent('block-changed', { bubbles: true }));
+};
+
+// ── Initialize slash menu keyboard nav ────────────────────────
+
+BlockEditor._slashVisible = function() {
+  return !!(slashMenu && slashMenu.style.display !== 'none');
+};
+
+document.addEventListener('keydown', (e) => {
+  if (!slashMenu || slashMenu.style.display === 'none') return;
+  const items = slashMenu.querySelectorAll('.slash-menu-item');
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    slashSelected = Math.min(slashSelected + 1, items.length - 1);
+    items.forEach((it, i) => it.classList.toggle('active', i === slashSelected));
+    items[slashSelected]?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    slashSelected = Math.max(slashSelected - 1, 0);
+    items.forEach((it, i) => it.classList.toggle('active', i === slashSelected));
+    items[slashSelected]?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (slashSelected >= 0 && items[slashSelected]) {
+      items[slashSelected].click();
+    }
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    BlockEditor.hideSlashMenu();
+  }
+});
+
+document.addEventListener('click', (e) => {
+  if (slashMenu && slashMenu.style.display !== 'none' && !slashMenu.contains(e.target)) {
+    BlockEditor.hideSlashMenu();
+  }
+});

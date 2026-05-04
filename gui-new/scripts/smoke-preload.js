@@ -1,0 +1,68 @@
+const fs = require('fs');
+const AdmZip = require('adm-zip');
+const { writeMdoArchive } = require('../mdo-archive');
+
+window.__lastWrite = null;
+window.__lastMdoWrite = null;
+window.__savedNotifications = [];
+
+const smokeImagePath = '/tmp/mdo-smoke-image.png';
+if (!fs.existsSync(smokeImagePath)) {
+  fs.writeFileSync(smokeImagePath, Buffer.from([
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+    0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+    0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41,
+    0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+    0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+    0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+    0x42, 0x60, 0x82,
+  ]));
+}
+
+window.mdoAPI = {
+  openFile: async () => window.__mockOpenFilePaths || [smokeImagePath],
+  openFolder: async () => null,
+  saveFile: async () => window.__mockSavePath || '/tmp/mdo-smoke-output.md',
+  selectFolder: async () => null,
+
+  readDir: async () => [],
+  stat: async () => ({ isFile: true, isDirectory: false, size: 0 }),
+  readFile: async () => '',
+  writeFile: async (filePath, data) => {
+    window.__lastWrite = { filePath, data };
+    return { ok: true };
+  },
+  writeMdoArchive: async (filePath, payload) => {
+    writeMdoArchive(filePath, payload);
+    window.__lastMdoWrite = { filePath, payload };
+    return { ok: true };
+  },
+  readArchive: async (zipPath, entryName) => {
+    const zip = new AdmZip(zipPath);
+    return zip.readAsText(entryName);
+  },
+  listArchive: async (zipPath) => {
+    const zip = new AdmZip(zipPath);
+    return zip.getEntries().map(entry => ({
+      name: entry.entryName,
+      isDirectory: entry.isDirectory,
+      size: entry.header.size,
+    }));
+  },
+
+  openInBrowser: async () => {},
+  getMediaDataUrl: async () => ({}),
+  getArchiveDataUrl: async () => ({}),
+
+  onOpenFile: () => {},
+  onEditFile: () => {},
+  onMenuNew: () => {},
+  onMenuOpen: () => {},
+  onMenuSave: () => {},
+
+  notifyDocumentSaved: (filePath) => {
+    window.__savedNotifications.push(filePath);
+  },
+};

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob: file:; img-src * data: file: blob:; media-src * data: file: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-src 'self' blob:;">
+  <title>Editor — MDO Viewer</title>
+  <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/blocks.css">
+</head>
+<body>
+  <div class="editor-fullscreen" id="editor-app">
+    <div class="editor-toolbar">
+      <div class="toolbar-group">
+        <input type="text" class="editor-title-input" id="editor-title" placeholder="Untitled" spellcheck="false">
+      </div>
+      <div class="toolbar-group">
+        <button class="btn btn-secondary btn-small" id="btn-block-picker" title="Insert Block">+ Block</button>
+        <button class="btn btn-secondary btn-small" id="btn-attach" title="Attach File">
+          <svg viewBox="0 0 24 24" style="width:13px;height:13px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Attach
+        </button>
+      </div>
+      <div class="toolbar-spacer"></div>
+      <button class="btn btn-primary btn-small" id="btn-save" title="Save">
+        <svg viewBox="0 0 24 24" style="width:13px;height:13px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        Save
+      </button>
+      <button class="btn btn-secondary btn-small" id="btn-save-as" title="Save As">Save As…</button>
+    </div>
+
+    <div class="block-editor" id="block-editor" style="flex:1;">
+      <div class="block-editor-inner" id="block-editor-inner"></div>
+    </div>
+
+    <div class="block-picker" id="block-picker" style="display:none;">
+      <div class="block-picker-section">
+        <div class="block-picker-label">Basic</div>
+        <div class="block-picker-item" data-block="text">Aa Text</div>
+        <div class="block-picker-item" data-block="heading-1">H1 Heading 1</div>
+        <div class="block-picker-item" data-block="heading-2">H2 Heading 2</div>
+        <div class="block-picker-item" data-block="heading-3">H3 Heading 3</div>
+        <div class="block-picker-item" data-block="page">📄 Page</div>
+      </div>
+      <div class="block-picker-section">
+        <div class="block-picker-label">Lists</div>
+        <div class="block-picker-item" data-block="bulleted-list">• Bulleted List</div>
+        <div class="block-picker-item" data-block="numbered-list">1. Numbered List</div>
+        <div class="block-picker-item" data-block="todo-list">☐ To-do List</div>
+        <div class="block-picker-item" data-block="toggle-list">▸ Toggle List</div>
+      </div>
+      <div class="block-picker-section">
+        <div class="block-picker-label">Content</div>
+        <div class="block-picker-item" data-block="quote">❝ Quote</div>
+        <div class="block-picker-item" data-block="callout">💡 Callout</div>
+        <div class="block-picker-item" data-block="code">⌨ Code Block</div>
+        <div class="block-picker-item" data-block="divider">— Divider</div>
+        <div class="block-picker-item" data-block="table">⊞ Table</div>
+        <div class="block-picker-item" data-block="columns">▦ Columns</div>
+      </div>
+      <div class="block-picker-section">
+        <div class="block-picker-label">Media</div>
+        <div class="block-picker-item" data-block="image">🖼 Image</div>
+        <div class="block-picker-item" data-block="video">🎬 Video</div>
+        <div class="block-picker-item" data-block="audio">🎵 Audio</div>
+        <div class="block-picker-item" data-block="file">📎 File</div>
+        <div class="block-picker-item" data-block="bookmark">🔖 Bookmark</div>
+        <div class="block-picker-item" data-block="embed">🌐 Embed</div>
+        <div class="block-picker-item" data-block="pdf">📋 PDF</div>
+      </div>
+      <div class="block-picker-section">
+        <div class="block-picker-label">Technical</div>
+        <div class="block-picker-item" data-block="equation">𝑓 Equation</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/blocks.js"></script>
+  <script src="js/editor.js"></script>
+</body>
+</html>
