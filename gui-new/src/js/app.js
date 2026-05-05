@@ -260,9 +260,12 @@ function showBlockTypePicker(rowEl, afterIndex, anchorEl) {
   }
 
   const rect = anchorEl.getBoundingClientRect();
+  const availHeight = window.innerHeight - rect.bottom - 8;
   picker.style.display = 'block';
   picker.style.top = (rect.bottom + 4) + 'px';
   picker.style.left = Math.min(rect.left, window.innerWidth - 240) + 'px';
+  picker.style.maxHeight = Math.min(Math.max(availHeight, 120), 380) + 'px';
+  picker.style.overflowY = 'auto';
 }
 
 function hideBlockTypePicker() {
@@ -465,6 +468,28 @@ function readAllBlocks() {
     if (block) tab.blocks.push(block);
   }
 }
+
+function handlePageNavigate(e) {
+  const targetId = e.detail?.id || '';
+  const sourceBlock = e.target.closest('.block');
+  const targetBlock = [...els.blockEditorInner.querySelectorAll('.block')]
+    .find(block => block !== sourceBlock && block.dataset.blockId === targetId);
+
+  if (targetBlock) {
+    targetBlock.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    focusBlock(targetBlock);
+    return;
+  }
+
+  const pageEl = e.target.closest('.page-block');
+  if (pageEl) {
+    pageEl.classList.add('page-missing');
+    clearTimeout(pageEl._pageMissingTimer);
+    pageEl._pageMissingTimer = setTimeout(() => pageEl.classList.remove('page-missing'), 900);
+  }
+}
+
+els.blockEditorInner.addEventListener('page-navigate', handlePageNavigate);
 
 // ── Outline (Headings) ────────────────────────────────────────
 

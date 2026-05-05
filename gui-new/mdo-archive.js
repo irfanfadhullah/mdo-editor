@@ -34,6 +34,10 @@ function writeMdoArchive(filePath, payload = {}) {
   zip.addFile('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'));
   zip.addFile('document.md', Buffer.from(payload.markdown || '', 'utf8'));
 
+  if (payload.metadata) {
+    zip.addFile('metadata.json', Buffer.from(JSON.stringify(payload.metadata, null, 2), 'utf8'));
+  }
+
   for (const asset of payload.assets || []) {
     const entryName = safeZipEntryName(asset.entryName);
     if (!entryName) continue;

@@ -1,22 +1,196 @@
-# MDO Viewer — Usage Guide
+# MDO Viewer — Complete Usage Guide
 
-## Viewer vs Editor Mode
+## Overview
 
-The app has two modes, toggled by the **✏ Edit / 👁 View** button in the toolbar:
+MDO Viewer is a block-based WYSIWYG document editor with two modes:
 
-| Mode | What you see | What you can do |
-|------|-------------|-----------------|
-| **View** (default) | Read-only rendered preview | Read, navigate outline, Ctrl+Click links |
-| **Edit** | Full WYSIWYG block editor | Type, format, insert blocks, slash commands |
+- **View mode** (default) — read-only rendered preview of your document
+- **Edit mode** — full block editor with slash commands, type picker, inline formatting, and media embedding
 
-In **edit mode**:
-- The background tints slightly to indicate editing state
-- Block drag handles appear on the left of each block
+Toggle between modes with the **✏ Edit / 👁 View** button in the toolbar.
+
+---
+
+## Interface
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  New  Open  Folder  Extract         Edit    filename.mdo    │ Toolbar
+├───────────┬────────────────────────────────┬────────────────┤
+│ Explorer  │  ┌────────────────────────┐    │ Outline        │
+│           │  │ # Heading 1            │    │                │
+│  📁 docs  │  │                        │    │ Heading 1      │
+│  📝 a.md  │  │ + Add a block ▾        │    │ Heading 2      │
+│  📝 b.md  │  │                        │    │ Subsection     │
+│  📦 x.mdo │  │ > Quote block          │    │                │
+│           │  │                        │    │                │
+│           │  │ + Add a block ▾        │    │                │
+│           │  └────────────────────────┘    │                │
+├───────────┴────────────────────────────────┴────────────────┤
+│  📝 a.md ×  📝 b.md ×                             + New Tab │ Tabs
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Panels
+
+| Panel | Location | Purpose |
+|-------|----------|---------|
+| **Explorer** | Left sidebar | Browse folders, open files, expand `.mdo` archives |
+| **Editor** | Center | Block editor / viewer content |
+| **Outline** | Right sidebar | Document headings — click to jump to section |
+| **Tabs** | Bottom | Switch between open documents |
+
+Resize panels by dragging the borders between them.
+
+---
+
+## Edit Mode
+
+### Visual Indicators
+
+When you enter edit mode:
+- The editor background tints slightly
+- Block drag handles (6 dots) appear on the left of each block (visible on hover)
 - **+ Add a block ▾** buttons appear between every block
-- Text blocks become editable (click to focus)
-- Media blocks (images, video, etc.) remain read-only visually
+- Text and heading blocks become editable (click to type)
+- Media blocks remain read-only visually but can be replaced via the slash menu
 
-Press `Ctrl+S` to save your changes at any time.
+### Creating Blocks
+
+There are three ways to add blocks:
+
+1. **+ Add a block** — click to insert a plain text block at that position
+2. **▾ arrow** — hover over the add button, then click the arrow to open the block type picker with all 23 types categorized. Selecting a media type opens a file picker; URL types prompt for a URL
+3. **Shift+Enter** — from inside any block, splits the block at the cursor and creates a new one below
+
+### Changing Block Types
+
+Once a block exists, change its type with **slash commands**:
+
+1. Click into the block to focus it
+2. Type `/` to open the slash command menu
+3. Continue typing to filter (e.g., `/code`, `/h1`, `/img`)
+4. Navigate with `↑` `↓` arrows, press `Enter` to select
+
+### Deleting Blocks
+
+- **Backspace** on an empty block deletes it (the last remaining block is kept)
+- **Backspace** on an empty non-text block first converts it to text, then deletes on second press
+
+### Enter vs Shift+Enter
+
+| Key | Behavior |
+|-----|----------|
+| **Enter** | Inserts a new line inside the current block |
+| **Shift+Enter** | Splits the block at the cursor — everything after the cursor becomes a new block below (same type) |
+
+---
+
+## Block Type Picker
+
+The `▾` arrow appears on hover next to any **+ Add a block** button. Click it to open a categorized dropdown of all 23 block types:
+
+| Category | Types |
+|----------|-------|
+| **Basic** | Text, Heading 1, Heading 2, Heading 3, Page |
+| **Lists** | Bulleted List, Numbered List, To-do List, Toggle List |
+| **Content** | Quote, Callout, Code Block, Divider, Table |
+| **Layout** | Columns |
+| **Media & Embeds** | Image, Video, Audio, File, Embed, Bookmark, PDF |
+| **Technical** | Equation |
+
+When you select a **media type** (image, video, audio, file, PDF), a file picker dialog opens automatically. Select a file and it's embedded. For `.mdo` archives, the file is bundled into the `assets/` directory on save.
+
+When you select an **URL type** (embed, bookmark), a prompt dialog appears asking for the URL.
+
+---
+
+## Slash Commands
+
+Type `/` in any editable block. The menu shows matching types filtered by name, ID, or shortcut.
+
+### Complete Command Reference
+
+| Type `/...` | Also works with | Block |
+|-------------|-----------------|-------|
+| `/t` | `/text` | Text |
+| `/h1` | `/heading1` | Heading 1 |
+| `/h2` | `/heading2` | Heading 2 |
+| `/h3` | `/heading3` | Heading 3 |
+| `/page` | — | Page |
+| `/ul` | `/bulletedlist` | Bulleted List |
+| `/ol` | `/numberedlist` | Numbered List |
+| `/todo` | `/todolist` | To-do List |
+| `/toggle` | `/togglelist` | Toggle List |
+| `/q` | `/quote` | Quote |
+| `/callout` | — | Callout |
+| `/code` | `/codeblock` | Code Block |
+| `/div` | `/divider` | Divider |
+| `/table` | — | Table |
+| `/cols` | `/columns` | Columns |
+| `/img` | `/image` | Image (file picker) |
+| `/vid` | `/video` | Video (file picker) |
+| `/aud` | `/audio` | Audio (file picker) |
+| `/file` | — | File (file picker) |
+| `/embed` | — | Embed (URL prompt) |
+| `/link` | `/bookmark` | Bookmark (URL prompt) |
+| `/math` | `/equation` | Equation |
+| `/pdf` | — | PDF (file picker) |
+
+---
+
+## Inline Formatting
+
+Inside Text, Heading, List, and Quote blocks, use Markdown syntax:
+
+| Type | Example | Result |
+|------|---------|--------|
+| Bold | `**hello**` | **hello** |
+| Italic | `*hello*` | *hello* |
+| Bold + Italic | `***hello***` | ***hello*** |
+| Inline Code | `` `code` `` | `code` |
+| Strikethrough | `~~text~~` | ~~text~~ |
+| Link | `[Google](https://google.com)` | hyperlink |
+| Image | `![alt](path/to/img.jpg)` | inline image |
+| Math | `$E=mc^2$` | inline LaTeX |
+
+---
+
+## Working with Files
+
+### Opening Files
+
+- **Toolbar Open button** → file dialog for `.md` or `.mdo`
+- **Drag and drop** any supported file onto the window
+- **File explorer** (left sidebar) → browse folders, click any file to open it
+- **Open Folder** button → loads entire directory into the file explorer tree
+
+### `.mdo` Archives
+
+When you open an `.mdo` file:
+1. The archive entries appear in the file explorer as an expandable tree
+2. Click `document.md` to load it as the main document
+3. Media referenced in the document (images, video, audio, PDF) load automatically from the archive
+
+When you **save** an `.mdo`:
+1. `document.md` is regenerated from the current block state
+2. `metadata.json` is regenerated with the current block types, media IDs, and relations
+3. `manifest.json` is updated with the current timestamp, title, and file list
+4. All existing `assets/` files are preserved from the source archive
+5. Any new media added via the editor gets bundled into `assets/`
+
+### Saving
+
+| Scenario | Behavior |
+|----------|----------|
+| New untitled document + `Ctrl+S` | Save As dialog → `.md` or `.mdo` |
+| Editing existing `.md` + `Ctrl+S` | Overwrites file as plain markdown |
+| Editing existing `.mdo` + `Ctrl+S` | Rebuilds the `.mdo` ZIP with updated manifest + metadata + document + assets |
+| Save As (always `.mdo`) | Creates a new `.mdo` archive with all current assets bundled |
+
+### Extracting Archives
+
+The **Extract** button (enabled when an `.mdo` is open) extracts the full archive contents to a directory you choose.
 
 ---
 
@@ -30,213 +204,121 @@ Press `Ctrl+S` to save your changes at any time.
 | `Ctrl+O` / `Cmd+O` | Open file dialog |
 | `Ctrl+N` / `Cmd+N` | New untitled document |
 
-### Editing (edit mode only)
+### Edit Mode
 
 | Shortcut | Action |
 |---|---|
 | `Enter` | New line inside current block |
-| `Shift+Enter` | Split block at cursor → create new block below |
-| `Backspace` | Delete empty block (won't delete last remaining block) |
-| `Tab` | (List blocks) Prevent indent (reserved for future) |
-| `Ctrl+Click` | Open link in system browser |
+| `Shift+Enter` | Split block at cursor → new block below |
+| `Backspace` | Delete empty block / convert non-text to text |
+| `/` | Open slash command menu |
 
-### Slash Menu Navigation
+### Menu Navigation
 
 | Shortcut | Action |
 |---|---|
-| `/` | Open slash command menu |
 | `↓` / `↑` | Navigate items |
 | `Enter` | Select highlighted item |
 | `Escape` | Close menu |
 
 ---
 
-## Slash Commands (`/`)
-
-Type `/` in any editable block to open the command menu. Continue typing to filter. The menu shows matching block types grouped by category.
-
-### Filtering
-
-You can filter by **name**, **ID**, or **shortcut**:
-
-- `/code` matches "Code Block"
-- `/h1` matches "Heading 1"  
-- `/img` matches "Image"
-- Just typing `/` shows all types
-
-### Complete Command Reference
-
-| Type in block | Result |
-|---|---|
-| `/t` or `/text` | Text paragraph |
-| `/h1` or `/heading1` | Heading 1 (largest) |
-| `/h2` or `/heading2` | Heading 2 |
-| `/h3` or `/heading3` | Heading 3 |
-| `/page` | Page link |
-| `/ul` or `/bulletedlist` | Bulleted list |
-| `/ol` or `/numberedlist` | Numbered list |
-| `/todo` or `/todolist` | To-do list with checkbox |
-| `/toggle` or `/togglelist` | Collapsible toggle |
-| `/q` or `/quote` | Blockquote |
-| `/callout` | Highlighted callout box |
-| `/code` or `/codeblock` | Code block |
-| `/div` or `/divider` | Horizontal divider |
-| `/table` | Editable table |
-| `/cols` or `/columns` | Multi-column layout |
-| `/img` or `/image` | Image (opens file picker) |
-| `/vid` or `/video` | Video (opens file picker) |
-| `/aud` or `/audio` | Audio (opens file picker) |
-| `/file` | File attachment (opens file picker) |
-| `/embed` | URL embed (prompts for URL) |
-| `/link` or `/bookmark` | Bookmark link (prompts for URL) |
-| `/math` or `/equation` | LaTeX equation |
-| `/pdf` | PDF embed (opens file picker) |
-
----
-
-## Block Type Picker
-
-In edit mode, each **+ Add a block** button has a `▾` arrow that appears on hover. Click `▾` to open a categorized dropdown of all 23 block types.
-
-**Categories:**
-- **Basic** — Text, Heading 1–3, Page
-- **Lists** — Bulleted List, Numbered List, To-do List, Toggle
-- **Content** — Quote, Callout, Code Block, Divider, Table
-- **Layout** — Columns
-- **Media & Embeds** — Image, Video, Audio, File, Embed, Bookmark, PDF
-- **Technical** — Equation
-
-**Media blocks** (image, video, audio, file, PDF) automatically open a file picker dialog when selected.
-
-**URL blocks** (embed, bookmark) prompt for a URL in a dialog box.
-
-Clicking **+ Add a block** (without `▾`) inserts a plain text block instantly.
-
----
-
-## All Block Types
+## All Block Types — Detailed
 
 ### Text
-Standard paragraph block. Supports inline Markdown formatting.
-- **Placeholder**: *Type / for commands…*
-- **Editable**: Yes (content and inline formatting)
+Standard paragraph. Placeholder: *"Type / for commands…"*. Supports all inline formatting.
 
 ### Heading 1 / 2 / 3
-Document headings for structure. Three sizes.
-- **Placeholder**: *heading 1…*, *heading 2…*, *heading 3…*
-- **Editable**: Yes (content and inline formatting)
-- **Appears in**: Outline panel (right sidebar)
-
-### Bulleted List
-Unordered list items with `•` bullet prefix.
-
-### Numbered List
-Auto-incrementing numbered items.
-
-### To-do List
-Checkbox items. Click the checkbox to toggle checked (strikethrough).
-
-### Toggle List
-Collapsible section. Click the `▶` arrow to expand/collapse hidden content.
-
-### Quote
-Blockquote with left accent border and italic styling.
-
-### Callout
-Highlighted info box with an icon (default: 💡). Useful for tips, warnings, notes. The icon and body are separately editable.
-
-### Code Block
-Monospace preformatted text. Spellcheck disabled. Optional language label (e.g. `javascript`, `python`, `swift`) shown at top-right.
-
-### Divider
-Horizontal rule separator (`---`). Non-editable, visual only.
-
-### Table
-Editable grid with header row (bold). Click cells to type. Rows and columns persist through save/load.
-
-### Columns
-Multi-column layout (2+ columns side by side). Each column is independently editable.
-
-### Image
-Embedded image with optional caption line below. Supports:
-- `file://` paths (local files)
-- `http(s)://` URLs
-- Archive-relative paths (inside `.mdo` files)
-
-**Selecting this type from the picker or slash menu opens a file dialog automatically.**
-
-### Video
-Embedded video player with controls. Same path support as Image. File dialog opens on selection.
-
-### Audio
-Embedded audio player with controls. Same path support. File dialog opens on selection.
-
-### File
-Clickable file attachment card showing filename. Click to open in system default app. File dialog opens on selection.
-
-### Embed
-Iframe embed for external web content. Prompts for URL on selection.
-
-### Bookmark
-Styled link preview card with title, description, and URL. Click to open in browser. Prompts for URL on selection.
-
-### Equation
-LaTeX math block in display mode. Plain text input, monospace/italic rendering.
+Document headings for structure. Three visual sizes (36px / 26px / 20px). Appear in the **Outline** panel — click any heading there to scroll to it.
 
 ### Page
-Internal page link for multi-page documents. Click to navigate.
+Internal page link for multi-page documents within an `.mdo` archive. Click to navigate.
+
+### Bulleted List
+Unordered items with `•` bullet prefix. Each item is its own block.
+
+### Numbered List
+Auto-incrementing numbered items (`1.`, `2.`, `3.`…). Counter resets per group.
+
+### To-do List
+Checkbox items. Click the checkbox to toggle between checked (strikethrough) and unchecked. State persists through save.
+
+### Toggle List
+Collapsible section. Click `▶` to expand, revealing hidden child content. Good for FAQs, spoilers, or details.
+
+### Quote
+Blockquote with a left accent border and italic styling. Multi-line quotes join adjacent `>` lines.
+
+### Callout
+Highlighted info box with an icon (default opens to 💡 but editable). Blue-tinted background with border. The icon and body text are independently editable.
+
+### Code Block
+Monospace preformatted text block. Spellcheck is disabled. An optional language label appears at the top-right corner (set by typing the language name in the code fence: ` ```javascript `).
+
+### Divider
+Horizontal rule separator. Non-editable — visual-only element. Serializes as `---`.
+
+### Table
+Editable grid. Header row is bold. Click any cell to type. Rows and columns persist through save/load. The markdown table format uses `| col1 | col2 |` with a separator row.
+
+### Columns
+Multi-column layout (2+ side-by-side columns). Each column is independently editable. Columns are responsive — they wrap on narrow screens.
+
+### Image
+Embedded image with an optional caption line below. Supports:
+- Local files (`file:///path/to/image.jpg`)
+- Remote URLs (`https://example.com/image.jpg`)
+- Archive-relative paths (`assets/image.jpg` inside `.mdo`)
+
+Selecting this type opens a **file picker** automatically.
+
+### Video
+Embedded video player with playback controls. Same path support as Image. Selecting opens a file picker.
+
+### Audio
+Embedded audio player with playback controls. Same path support. Selecting opens a file picker.
+
+### File
+Clickable file attachment card showing the file name. Click to attempt to open in the system default application. Selecting opens a file picker.
+
+### Embed
+Iframe embed for external web content. Selecting prompts for a URL.
+
+### Bookmark
+Styled link preview card with title, description, and URL. Clicking the card opens the URL in the browser. Selecting prompts for a URL.
+
+### Equation
+LaTeX math block in display mode. Rendered in a serif/math font, centered.
 
 ### PDF
-Embedded PDF viewer (iframe). File dialog opens on selection.
+Embedded PDF viewer using an iframe. Selecting opens a file picker. The PDF is bundled into the archive on `.mdo` save.
 
 ---
 
-## Inline Formatting (Markdown)
+## Tips & Troubleshooting
 
-Inside **Text**, **Heading**, **List**, and **Quote** blocks, use these Markdown patterns for rich text:
+### General
+- **Outline panel** — click any heading to scroll directly to that section
+- **Ctrl+Click** any link to open in your default browser
+- **Right-click** in the editor for context menu: Copy selected text, Copy Link, Paste as new block
+- **Tab close button** (`×`) closes that document — unsaved changes are tracked in memory
+- **+ New Tab** button (bottom-right of tab bar) opens a blank document in a new tab
 
-| Input | Rendered output |
-|---|---|
-| `**bold**` | **bold** |
-| `*italic*` | *italic* |
-| `***bold italic***` | ***bold italic*** |
-| `` `code` `` | `code` (monospace) |
-| `~~strikethrough~~` | ~~strikethrough~~ |
-| `$E=mc^2$` | inline LaTeX math |
-| `[link text](https://example.com)` | hyperlink |
-| `![alt text](image.png)` | inline image |
+### Editing
+- **Shift+Enter** in the middle of text splits everything after the cursor into a new block (same type)
+- **Backspace** on empty heading/list/quote converts it to plain text first — press again to delete
+- **View ↔ Edit** toggle lets you preview rendered output without leaving the app
+- The slash menu scroll height adapts to available screen space — if near the bottom of the screen, the menu shrinks to fit
 
----
+### Media
+- Media files selected with the file picker are stored with `file://` absolute paths in `.md` files
+- In `.mdo` archives, media is bundled into `assets/` with relative paths
+- When editing an `.mdo`, existing assets are preserved and new ones are added on save
+- Large media files may take a moment to load — the app loads them asynchronously
 
-## Working with Files
-
-### Opening Files
-- **Toolbar** → Open button → choose `.md` or `.mdo` file
-- **Drag & drop** any file onto the window
-- **File explorer** (left sidebar) → browse folders, click files to open
-- **Tabs** open for each file; close with `×` button
-
-### `.mdo` Archives
-`.mdo` files are ZIP archives. When opened:
-- The archive contents appear in the file explorer tree
-- `document.md` loads as the main document
-- Images and media inside the archive load automatically
-
-### Saving
-- `Ctrl+S` to save current document
-- If the file is unnamed, a Save As dialog appears
-- Files save as `.md` (Markdown) format
-- Newly saved files appear in the file explorer
-
----
-
-## Tips & Tricks
-
-- **Outline panel** (right sidebar) lists all headings — click one to scroll there instantly
-- **Ctrl+Click** any link to open it in your default browser
-- **Resize panels** by dragging the borders between sidebar/content/outline
-- **Right-click** in the editor for context menu (copy, paste as new block)
-- **Multiple tabs** let you work on several documents and switch between them
-- **Shift+Enter** in the middle of text splits: everything after the cursor becomes a new block below
-- **Backspace** on an empty non-text block (heading, list, etc.) converts it to plain text — press Backspace again to delete it
-- **View mode** shows fully rendered output: toggle between Edit ↔ View to preview your work
+### Saving `.mdo` Files
+- Always saves the complete archive: `manifest.json` + `metadata.json` + `document.md` + `assets/`
+- `metadata.json` is regenerated from the current block state — edits, additions, deletions are all reflected
+- The original `manifest.json` `files` array is updated with new media entries
+- Existing asset files from the source archive are copied forward — nothing is lost
+- If you want to save as plain markdown instead, use **Save As** and choose `.md` format

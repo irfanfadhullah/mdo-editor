@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 const AdmZip = require('adm-zip');
 const { writeMdoArchive } = require('../mdo-archive');
 
@@ -21,6 +22,24 @@ if (!fs.existsSync(smokeImagePath)) {
   ]));
 }
 
+function mimeFor(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const mimeMap = {
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp', '.gif': 'image/gif', '.svg': 'image/svg+xml',
+    '.bmp': 'image/bmp',
+    '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+    '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+    '.flac': 'audio/flac', '.aac': 'audio/aac',
+    '.pdf': 'application/pdf', '.txt': 'text/plain',
+  };
+  return mimeMap[ext] || 'application/octet-stream';
+}
+
+function toDataUrl(filePath, data) {
+  return 'data:' + mimeFor(filePath) + ';base64,' + data.toString('base64');
+}
+
 window.mdoAPI = {
   openFile: async () => window.__mockOpenFilePaths || [smokeImagePath],
   openFolder: async () => null,
@@ -29,7 +48,13 @@ window.mdoAPI = {
 
   readDir: async () => [],
   stat: async () => ({ isFile: true, isDirectory: false, size: 0 }),
-  readFile: async () => '',
+  readFile: async (filePath, encoding = 'utf8') => {
+    try {
+      return fs.readFileSync(filePath, encoding);
+    } catch (err) {
+      return { error: err.message };
+    }
+  },
   writeFile: async (filePath, data) => {
     window.__lastWrite = { filePath, data };
     return { ok: true };
@@ -39,9 +64,13 @@ window.mdoAPI = {
     window.__lastMdoWrite = { filePath, payload };
     return { ok: true };
   },
-  readArchive: async (zipPath, entryName) => {
+  readArchive: async (zipPath, entryName, encoding = 'utf8') => {
     const zip = new AdmZip(zipPath);
-    return zip.readAsText(entryName);
+    const entry = zip.getEntry(entryName);
+    if (!entry) return { error: `Entry not found: ${entryName}` };
+    return encoding === 'base64'
+      ? entry.getData().toString('base64')
+      : zip.readAsText(entryName, encoding);
   },
   listArchive: async (zipPath) => {
     const zip = new AdmZip(zipPath);
@@ -53,8 +82,25 @@ window.mdoAPI = {
   },
 
   openInBrowser: async () => {},
-  getMediaDataUrl: async () => ({}),
-  getArchiveDataUrl: async () => ({}),
+  getMediaDataUrl: async (filePath) => {
+    try {
+      const resolved = String(filePath || '').replace(/^file:\/\//i, '');
+      return { dataUrl: toDataUrl(resolved, fs.readFileSync(resolved)) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  },
+  getArchiveDataUrl: async (zipPath, entryName) => {
+    try {
+      const zip = new AdmZip(zipPath);
+      const safeEntryName = String(entryName || '').replace(/^\/+/, '');
+      const entry = zip.getEntry(safeEntryName) || zip.getEntries().find(e => e.entryName.toLowerCase() === safeEntryName.toLowerCase());
+      if (!entry) return { error: `Entry not found: ${entryName}` };
+      return { dataUrl: toDataUrl(safeEntryName, entry.getData()) };
+    } catch (err) {
+      return { error: err.message };
+    }
+  },
 
   onOpenFile: () => {},
   onEditFile: () => {},

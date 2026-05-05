@@ -222,6 +222,50 @@ function uniqueAssetEntryName(src, used, index) {
   return candidate;
 }
 
+function buildMetadata(blocks, title) {
+  const metadataBlocks = [];
+  const mediaList = [];
+  const mediaMap = new Map();
+  let mediaIdx = 1;
+
+  for (const b of blocks) {
+    const copy = {
+      id: b.id,
+      type: b.type,
+      content: b.content || '',
+    };
+
+    if (b.type === 'code' && b.meta?.language) {
+      copy.language = b.meta.language;
+    }
+
+    if (['image', 'video', 'audio', 'file', 'pdf'].includes(b.type)) {
+      const src = b.meta?.src || '';
+      if (src && !mediaMap.has(src)) {
+        const mid = 'media-' + (mediaIdx++);
+        mediaMap.set(src, mid);
+        mediaList.push({
+          id: mid,
+          path: src,
+          type: b.type,
+        });
+      }
+      copy.mediaIds = [mediaMap.get(src)].filter(Boolean);
+    }
+
+    metadataBlocks.push(copy);
+  }
+
+  return {
+    format: 'mdo-metadata',
+    version: '1.0',
+    title: title || 'Untitled',
+    blocks: metadataBlocks,
+    media: mediaList,
+    relations: [],
+  };
+}
+
 BlockEditor.createMdoArchivePayload = function(blocks, options = {}) {
   const archivePath = options.archivePath || null;
   const usedAssets = new Set();
@@ -275,11 +319,14 @@ BlockEditor.createMdoArchivePayload = function(blocks, options = {}) {
     version: '1.0',
     title: options.title || 'Untitled',
     document: 'document.md',
+    metadata: 'metadata.json',
     files,
     assets: assets.map(asset => ({ path: asset.entryName })),
   };
 
-  return { markdown, manifest, assets };
+  const metadata = buildMetadata(packagedBlocks, manifest.title);
+
+  return { markdown, manifest, metadata, assets };
 };
 
 // ── Text offset helper for cursor split ──────────────────────
@@ -292,6 +339,93 @@ function getTextOffset(root, node, offset) {
     pos += n.textContent.length;
   }
   return pos;
+}
+
+function blockFromMarkdownLink(label, url) {
+  const content = (label || '').trim();
+  const href = (url || '').trim();
+  if (/^page:/i.test(href)) {
+    return { id: BlockEditor.nextId(), type: 'page', content, meta: { id: href.replace(/^page:/i, '') } };
+  }
+  if (/^Embed$/i.test(content)) {
+    return { id: BlockEditor.nextId(), type: 'embed', content, meta: { url: href } };
+  }
+  if (/\.(png|jpg|jpeg|webp|gif|svg|bmp)(?:[?#].*)?$/i.test(href)) {
+    return { id: BlockEditor.nextId(), type: 'image', content, meta: { src: href } };
+  }
+  if (/\.(mp4|webm|mov|mkv)(?:[?#].*)?$/i.test(href)) {
+    return { id: BlockEditor.nextId(), type: 'video', content, meta: { src: href } };
+  }
+  if (/\.(mp3|wav|ogg|flac|aac)(?:[?#].*)?$/i.test(href)) {
+    return { id: BlockEditor.nextId(), type: 'audio', content, meta: { src: href } };
+  }
+  if (/\.pdf(?:[?#].*)?$/i.test(href)) {
+    return { id: BlockEditor.nextId(), type: 'pdf', content, meta: { src: href } };
+  }
+  if (/^https?:\/\//i.test(href)) {
+    return { id: BlockEditor.nextId(), type: 'bookmark', content, meta: { url: href } };
+  }
+  return { id: BlockEditor.nextId(), type: 'file', content, meta: { src: href } };
+}
+
+function parseStandaloneBlockTokens(text) {
+  const blocks = [];
+  let pos = 0;
+  const source = text || '';
+
+  while (pos < source.length) {
+    while (pos < source.length && /\s/.test(source[pos])) pos++;
+    if (pos >= source.length) break;
+
+    const rest = source.slice(pos);
+    let match = rest.match(/^!\[([^\]]*)\]\(([^)]+)\)/);
+    if (match) {
+      blocks.push({
+        id: BlockEditor.nextId(),
+        type: 'image',
+        content: match[1].trim(),
+        meta: { src: match[2].trim() },
+      });
+      pos += match[0].length;
+      continue;
+    }
+
+    match = rest.match(/^\[([^\]]+)\]\(([^)]+)\)/);
+    if (match) {
+      blocks.push(blockFromMarkdownLink(match[1], match[2]));
+      pos += match[0].length;
+      continue;
+    }
+
+    match = rest.match(/^\$\$([\s\S]+?)\$\$/);
+    if (match) {
+      blocks.push({
+        id: BlockEditor.nextId(),
+        type: 'equation',
+        content: match[1].trim(),
+      });
+      pos += match[0].length;
+      continue;
+    }
+
+    return null;
+  }
+
+  return blocks.length ? blocks : null;
+}
+
+function firstEmbeddedStandaloneBlockIndex(text) {
+  const source = text || '';
+  const candidates = [];
+  for (const token of ['![', '[', '$$']) {
+    let idx = source.indexOf(token);
+    while (idx > 0) {
+      candidates.push(idx);
+      idx = source.indexOf(token, idx + token.length);
+    }
+  }
+  candidates.sort((a, b) => a - b);
+  return candidates.find(idx => parseStandaloneBlockTokens(source.slice(idx))) ?? -1;
 }
 
 // ── Markdown → Blocks Parser ─────────────────────────────────
@@ -307,6 +441,13 @@ BlockEditor.parseMarkdown = function(markdown) {
 
     // Empty line
     if (/^\s*$/.test(line)) { i++; continue; }
+
+    const standaloneBlocks = parseStandaloneBlockTokens(line);
+    if (standaloneBlocks) {
+      blocks.push(...standaloneBlocks);
+      i++;
+      continue;
+    }
 
     // Divider
     if (/^---\s*$/.test(line)) {
@@ -340,6 +481,26 @@ BlockEditor.parseMarkdown = function(markdown) {
       continue;
     }
 
+    // Equation block
+    if (/^\$\$/.test(line)) {
+      let equationContent = line.replace(/^\$\$/, '');
+      i++;
+      if (/\$\$\s*$/.test(equationContent)) {
+        equationContent = equationContent.replace(/\$\$\s*$/, '');
+      } else {
+        while (i < lines.length && !/\$\$\s*$/.test(lines[i])) {
+          equationContent += (equationContent ? '\n' : '') + lines[i];
+          i++;
+        }
+        if (i < lines.length) {
+          equationContent += (equationContent ? '\n' : '') + lines[i].replace(/\$\$\s*$/, '');
+          i++;
+        }
+      }
+      blocks.push({ id: BlockEditor.nextId(), type: 'equation', content: equationContent.trim() });
+      continue;
+    }
+
     // Quote
     if (/^>\s?/.test(line)) {
       let quoteContent = line.replace(/^>\s?/, '');
@@ -369,13 +530,32 @@ BlockEditor.parseMarkdown = function(markdown) {
     if (/^<!-- columns -->/.test(line)) {
       i++;
       let colContent = '';
-      while (i < lines.length && !/^<!--/.test(lines[i])) {
+      const isColumnBoundary = (candidate) => {
+        const trimmed = (candidate || '').trim();
+        if (!trimmed || /^<!--/.test(trimmed)) return true;
+        if (/^---col---$/i.test(trimmed)) return false;
+        return /^(#{1,6}\s|```|>\s?|[-*+]\s|\d+\.\s|!\[|---\s*$|\|.+\||\[.+\]\(.+\)\s*$|\$\$)/.test(trimmed);
+      };
+      let splitAtEmbeddedBlock = false;
+      while (i < lines.length && !isColumnBoundary(lines[i])) {
+        const embeddedIndex = firstEmbeddedStandaloneBlockIndex(lines[i]);
+        if (embeddedIndex > 0) {
+          const before = lines[i].slice(0, embeddedIndex).trimEnd();
+          const after = lines[i].slice(embeddedIndex).trimStart();
+          if (before) colContent += (colContent ? '\n' : '') + before;
+          lines[i] = after;
+          splitAtEmbeddedBlock = true;
+          break;
+        }
         colContent += (colContent ? '\n' : '') + lines[i];
         i++;
       }
-      const cols = colContent.split(/<\/div>\s*<div class="column">/i).map(c =>
-        c.replace(/<div class="column">/i, '').replace(/<\/div>/i, '').trim()
-      );
+      if (!splitAtEmbeddedBlock && i < lines.length && /^\s*$/.test(lines[i])) i++;
+      const cols = /---col---/i.test(colContent)
+        ? colContent.split(/\s*---col---\s*/i).map(c => c.trim())
+        : colContent.split(/<\/div>\s*<div class="column">/i).map(c =>
+            c.replace(/<div class="column">/i, '').replace(/<\/div>/i, '').trim()
+          );
       blocks.push({ id: BlockEditor.nextId(), type: 'columns', content: cols.join('\n---col---\n'), meta: { columns: cols } });
       continue;
     }
@@ -409,7 +589,8 @@ BlockEditor.parseMarkdown = function(markdown) {
 
     // Toggle
     if (/^<!-- toggle -->/.test(line) || /^<details>/.test(line)) {
-      i++;
+      if (/^<!-- toggle -->/.test(line)) i++;
+      if (lines[i] && /^<details>/.test(lines[i])) i++;
       let summary = '', toggleContent = '';
       if (lines[i] && /^<summary>/.test(lines[i])) {
         summary = lines[i].replace(/<\/?summary>/g, '');
@@ -444,27 +625,14 @@ BlockEditor.parseMarkdown = function(markdown) {
     // Bookmark / Embed
     const linkMatch = line.match(/^\[([^\]]+)\]\(([^)]+)\)\s*$/);
     if (linkMatch) {
-      const url = linkMatch[2];
-      if (/\.(png|jpg|jpeg|webp|gif|svg|bmp)$/i.test(url)) {
-        blocks.push({ id: BlockEditor.nextId(), type: 'image', content: linkMatch[1], meta: { src: url } });
-      } else if (/\.(mp4|webm|mov|mkv)$/i.test(url)) {
-        blocks.push({ id: BlockEditor.nextId(), type: 'video', content: linkMatch[1], meta: { src: url } });
-      } else if (/\.(mp3|wav|ogg|flac)$/i.test(url)) {
-        blocks.push({ id: BlockEditor.nextId(), type: 'audio', content: linkMatch[1], meta: { src: url } });
-      } else if (/\.pdf$/i.test(url)) {
-        blocks.push({ id: BlockEditor.nextId(), type: 'pdf', content: linkMatch[1], meta: { src: url } });
-      } else if (/^https?:\/\//.test(url)) {
-        blocks.push({ id: BlockEditor.nextId(), type: 'bookmark', content: linkMatch[1], meta: { url } });
-      } else {
-        blocks.push({ id: BlockEditor.nextId(), type: 'file', content: linkMatch[1], meta: { src: url } });
-      }
+      blocks.push(blockFromMarkdownLink(linkMatch[1], linkMatch[2]));
       i++; continue;
     }
 
     // Default: text/paragraph
     let textContent = line;
     i++;
-    while (i < lines.length && !/^\s*$/.test(lines[i]) && !/^(#{1,6}\s|```|>\s?|[-*+]\s|\d+\.\s|!\[|---|^\|.+|<!--|^\[.+\]\(.+\)\s*$)/.test(lines[i])) {
+    while (i < lines.length && !/^\s*$/.test(lines[i]) && !/^(#{1,6}\s|```|>\s?|[-*+]\s|\d+\.\s|!\[|---|^\|.+|<!--|^\[.+\]\(.+\)\s*$|\$\$)/.test(lines[i])) {
       textContent += '\n' + lines[i];
       i++;
     }
@@ -542,7 +710,9 @@ BlockEditor.serializeMarkdown = function(blocks) {
         lines.push('[Embed](' + (b.meta?.url || '') + ')');
         break;
       case 'equation':
-        lines.push('$$' + b.content + '$$');
+        lines.push('$$');
+        lines.push(b.content || '');
+        lines.push('$$');
         break;
       case 'pdf':
         lines.push('[' + (b.content || 'PDF') + '](' + (b.meta?.src || '') + ')');
@@ -601,6 +771,30 @@ async function loadMediaSrc(el, src) {
   }
 }
 
+async function loadFrameSrc(el, src) {
+  if (!src) return;
+  if (src.startsWith('data:') || src.startsWith('blob:') || src.startsWith('http://') || src.startsWith('https://')) {
+    el.src = src;
+    return;
+  }
+  if (window._archivePath && window.mdoAPI?.getArchiveDataUrl) {
+    const raw = src.startsWith('file://') ? src.replace('file://', '') : src;
+    const paths = [raw, decodeURIComponent(raw), raw.replace(/%20/g, ' '), raw.replace(/ /g, '%20')];
+    for (const p of paths) {
+      const result = await window.mdoAPI.getArchiveDataUrl(window._archivePath, p);
+      if (result.dataUrl) { el.src = result.dataUrl; return; }
+    }
+  }
+  if (window.mdoAPI?.getMediaDataUrl) {
+    const resolved = resolvePath(src);
+    const result = await window.mdoAPI.getMediaDataUrl(resolved);
+    if (result.dataUrl) el.src = result.dataUrl;
+    else el.src = resolveFileUrl(src);
+  } else {
+    el.src = resolveFileUrl(src);
+  }
+}
+
 function resolvePath(src) {
   if (src.startsWith('file://')) return src.replace('file://', '');
   if (src.startsWith('/')) return src;
@@ -615,6 +809,64 @@ function resolveFileUrl(src) {
   if (src.startsWith('file://')) return src;
   if (src.startsWith('/')) return 'file://' + src;
   return src;
+}
+
+function escapeHtml(text) {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderLatexInline(source) {
+  const commandMap = {
+    alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', theta: 'θ',
+    lambda: 'λ', mu: 'μ', pi: 'π', sigma: 'σ', phi: 'φ', omega: 'ω',
+    Gamma: 'Γ', Delta: 'Δ', Theta: 'Θ', Lambda: 'Λ', Pi: 'Π', Sigma: 'Σ', Phi: 'Φ', Omega: 'Ω',
+    pm: '±', times: '×', cdot: '·', div: '÷', leq: '≤', geq: '≥', neq: '≠',
+    approx: '≈', infty: '∞', to: '→', rightarrow: '→', leftarrow: '←',
+    partial: '∂', nabla: '∇',
+  };
+
+  let html = escapeHtml(source)
+    .replace(/\\left|\\right/g, '')
+    .replace(/\\sum_\{([^{}]+)\}\^\{([^{}]+)\}/g, '<span class="latex-op"><span class="latex-upper">$2</span><span class="latex-symbol">Σ</span><span class="latex-lower">$1</span></span>')
+    .replace(/\\int_\{([^{}]+)\}\^\{([^{}]+)\}/g, '<span class="latex-op"><span class="latex-upper">$2</span><span class="latex-symbol">∫</span><span class="latex-lower">$1</span></span>')
+    .replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '<span class="latex-frac"><span class="latex-num">$1</span><span class="latex-den">$2</span></span>')
+    .replace(/\\sqrt\{([^{}]+)\}/g, '<span class="latex-root"><span class="latex-radical">√</span><span class="latex-radicand">$1</span></span>')
+    .replace(/([A-Za-z0-9)\]}])\^\{([^{}]+)\}/g, '$1<sup>$2</sup>')
+    .replace(/([A-Za-z0-9)\]}])_\{([^{}]+)\}/g, '$1<sub>$2</sub>')
+    .replace(/([A-Za-z0-9)\]}])\^([A-Za-z0-9+-]+)/g, '$1<sup>$2</sup>')
+    .replace(/([A-Za-z0-9)\]}])_([A-Za-z0-9+-]+)/g, '$1<sub>$2</sub>')
+    .replace(/\\([A-Za-z]+)/g, (match, command) => commandMap[command] || match)
+    .replace(/\n/g, '<br>');
+
+  return html;
+}
+
+function renderLatexDisplay(latex) {
+  if (!latex) return '<span class="latex-empty">Type LaTeX equation...</span>';
+  const matrices = [];
+  const withPlaceholders = String(latex).replace(/\\begin\{([bp]?matrix)\}([\s\S]*?)\\end\{\1\}/g, (_, matrixType, body) => {
+    const rows = body.split(/\\\\/).map(row => row.trim()).filter(Boolean);
+    const table = rows.map(row => {
+      const cells = row.split('&').map(cell => '<td>' + renderLatexInline(cell.trim()) + '</td>').join('');
+      return '<tr>' + cells + '</tr>';
+    }).join('');
+    const bracketClass = matrixType === 'pmatrix' ? ' paren' : matrixType === 'matrix' ? ' plain' : '';
+    const html = '<span class="latex-matrix' + bracketClass + '"><table>' + table + '</table></span>';
+    const token = '@@MATRIX' + matrices.length + '@@';
+    matrices.push({ token, html });
+    return token;
+  });
+
+  let html = renderLatexInline(withPlaceholders);
+  for (const matrix of matrices) {
+    html = html.replace(matrix.token, matrix.html);
+  }
+  return html;
 }
 
 // ── Block → DOM Renderer ─────────────────────────────────────
@@ -900,10 +1152,31 @@ BlockEditor.renderBlock = function(block, isEditable = true) {
       break;
 
     case 'equation':
-      content.contentEditable = 'true';
+      content.contentEditable = 'false';
       content.dataset.placeholder = 'Type LaTeX equation…';
       content.setAttribute('spellcheck', 'false');
-      content.textContent = block.content || '';
+      content.dataset.latex = block.content || '';
+      {
+        const preview = document.createElement('div');
+        preview.className = 'equation-preview';
+        preview.innerHTML = renderLatexDisplay(block.content || '');
+        content.appendChild(preview);
+
+        if (ed) {
+          const source = document.createElement('div');
+          source.className = 'equation-source';
+          source.contentEditable = 'true';
+          source.dataset.placeholder = 'LaTeX, e.g. \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}';
+          source.setAttribute('spellcheck', 'false');
+          source.textContent = block.content || '';
+          source.addEventListener('input', () => {
+            content.dataset.latex = source.innerText.trim();
+            preview.innerHTML = renderLatexDisplay(content.dataset.latex);
+            content.closest('.block-editor')?.dispatchEvent(new CustomEvent('block-changed'));
+          });
+          content.appendChild(source);
+        }
+      }
       break;
 
     case 'page':
@@ -911,12 +1184,30 @@ BlockEditor.renderBlock = function(block, isEditable = true) {
       {
         const icon = document.createElement('span');
         icon.className = 'page-icon';
-        icon.textContent = '📄';
+        icon.textContent = '▦';
+        icon.setAttribute('aria-hidden', 'true');
         content.appendChild(icon);
-        const text = document.createTextNode(block.content || 'Untitled Page');
-        content.appendChild(text);
+        const label = document.createElement('span');
+        label.className = 'page-title';
+        label.textContent = block.content || 'Untitled Page';
+        content.appendChild(label);
+        content.dataset.pageId = block.meta?.id || '';
+        content.title = block.meta?.id ? 'Page reference: ' + block.meta.id : 'Page reference';
+        content.tabIndex = 0;
         content.addEventListener('click', () => {
-          if (block.meta?.id) alert('Navigate to page: ' + block.meta.id);
+          content.dispatchEvent(new CustomEvent('page-navigate', {
+            bubbles: true,
+            detail: {
+              id: block.meta?.id || '',
+              title: block.content || 'Untitled Page',
+            },
+          }));
+        });
+        content.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            content.click();
+          }
         });
       }
       break;
@@ -925,13 +1216,13 @@ BlockEditor.renderBlock = function(block, isEditable = true) {
       content.contentEditable = 'false';
       if (block.meta?.src) {
         const iframe = document.createElement('iframe');
-        iframe.src = block.meta.src;
         iframe.dataset.src = block.meta.src;
         iframe.style.width = '100%';
         iframe.style.minHeight = '500px';
         iframe.style.border = '1px solid var(--border)';
         iframe.style.borderRadius = 'var(--radius-md)';
         content.appendChild(iframe);
+        loadFrameSrc(iframe, block.meta.src);
       }
       break;
 
@@ -1117,7 +1408,12 @@ BlockEditor.readBlock = function(blockEl) {
       break;
 
     case 'equation':
-      block.content = contentEl.innerText.trim();
+      {
+        const source = contentEl.querySelector('.equation-source');
+        block.content = source
+          ? source.innerText.trim()
+          : (contentEl.dataset.latex || block.content || '').trim();
+      }
       break;
 
     default:
@@ -1192,9 +1488,12 @@ BlockEditor.showSlashMenu = function(targetBlockEl, filterText) {
   }
 
   const rect = targetBlockEl.getBoundingClientRect();
+  const availHeight = window.innerHeight - rect.bottom - 8;
   menu.style.display = 'block';
-  menu.style.top = Math.min(rect.bottom + 4, window.innerHeight - 400) + 'px';
+  menu.style.top = (rect.bottom + 4) + 'px';
   menu.style.left = Math.min(rect.left, window.innerWidth - 280) + 'px';
+  menu.style.maxHeight = Math.min(Math.max(availHeight, 120), 380) + 'px';
+  menu.style.overflowY = 'auto';
   slashTarget = targetBlockEl;
 };
 

@@ -271,6 +271,28 @@ function readAllBlocks() {
   }
 }
 
+function handlePageNavigate(e) {
+  const targetId = e.detail?.id || '';
+  const sourceBlock = e.target.closest('.block');
+  const targetBlock = [...els.blockEditorInner.querySelectorAll('.block')]
+    .find(block => block !== sourceBlock && block.dataset.blockId === targetId);
+
+  if (targetBlock) {
+    targetBlock.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    focusBlock(targetBlock);
+    return;
+  }
+
+  const pageEl = e.target.closest('.page-block');
+  if (pageEl) {
+    pageEl.classList.add('page-missing');
+    clearTimeout(pageEl._pageMissingTimer);
+    pageEl._pageMissingTimer = setTimeout(() => pageEl.classList.remove('page-missing'), 900);
+  }
+}
+
+els.blockEditorInner.addEventListener('page-navigate', handlePageNavigate);
+
 // ── Block Picker ──────────────────────────────────────────────
 
 let pickerOpen = false;
