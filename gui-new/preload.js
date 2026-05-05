@@ -18,6 +18,11 @@ contextBridge.exposeInMainWorld('mdoAPI', {
   getMediaDataUrl: (filePath) => ipcRenderer.invoke('media:getDataUrl', filePath),
   getArchiveDataUrl: (zipPath, entryName) => ipcRenderer.invoke('media:getArchiveDataUrl', zipPath, entryName),
 
+  printToPDF: (html, title) => ipcRenderer.invoke('export:pdf', html, title),
+  exportDOCX: (blocks, title) => ipcRenderer.invoke('export:docx', blocks, title),
+  writeExportFile: (filePath, data) => ipcRenderer.invoke('fs:writeFile', filePath, data),
+  writeBase64: (filePath, base64) => ipcRenderer.invoke('fs:writeBase64', filePath, base64),
+
   onOpenFile: (callback) => ipcRenderer.on('open-file', (_, path) => callback(path)),
   onEditFile: (callback) => ipcRenderer.on('edit-file', (_, path) => callback(path)),
 

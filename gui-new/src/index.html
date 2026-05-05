@@ -28,16 +28,40 @@
           <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         </button>
       </div>
+      <div class="toolbar-group">
+        <button class="toolbar-btn" id="btn-export-html" title="Export HTML">
+          <svg viewBox="0 0 24 24" style="width:15px;height:15px;"><path d="M4 4h16v4l-4 4 4 4v4H4v-4l4-4-4-4z"/></svg>
+        </button>
+        <button class="toolbar-btn" id="btn-export-pdf" title="Export PDF">
+          <svg viewBox="0 0 24 24" style="width:15px;height:15px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        </button>
+        <button class="toolbar-btn" id="btn-export-docx" title="Export DOCX">
+          <svg viewBox="0 0 24 24" style="width:15px;height:15px;"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>
+        </button>
+      </div>
       <div class="toolbar-spacer"></div>
+      <div class="theme-toggle-btn" id="btn-theme-toggle" title="Toggle Dark Mode" style="margin-right:8px;">🌙</div>
       <button class="btn btn-ghost btn-small" id="btn-edit-toggle" title="Toggle Edit Mode">
         <svg viewBox="0 0 24 24" style="width:14px;height:14px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         Edit
       </button>
       <span class="toolbar-path" id="toolbar-path"></span>
+      <span id="save-indicator" style="font-size:11px;color:var(--text-tertiary);margin-left:6px;display:none;"></span>
     </div>
 
     <!-- Main panels -->
     <div class="main-panels" id="main-panels">
+      <!-- Find/Replace Bar -->
+      <div class="find-bar" id="find-bar" style="display:none;">
+        <input type="text" id="find-input" placeholder="Find…" autocomplete="off">
+        <span id="find-count" style="font-size:11px;color:var(--text-tertiary);margin:0 6px;white-space:nowrap;"></span>
+        <button class="find-btn" id="btn-find-prev" title="Previous match">◂</button>
+        <button class="find-btn" id="btn-find-next" title="Next match">▸</button>
+        <input type="text" id="replace-input" placeholder="Replace with…" autocomplete="off" style="margin-left:8px;">
+        <button class="find-btn" id="btn-replace-one" title="Replace">Replace</button>
+        <button class="find-btn" id="btn-replace-all" title="Replace All">All</button>
+        <button class="find-btn find-close" id="btn-find-close" title="Close">×</button>
+      </div>
       <!-- Sidebar: File Explorer -->
       <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
@@ -68,6 +92,7 @@
               </div>
             </div>
           </div>
+          <div class="block-status-bar" id="block-status-bar" style="display:none;"></div>
         </div>
       </div>
 
@@ -89,6 +114,8 @@
   </div>
 
   <script src="js/blocks.js"></script>
+  <script src="js/export-html.js"></script>
+  <script src="js/undo.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

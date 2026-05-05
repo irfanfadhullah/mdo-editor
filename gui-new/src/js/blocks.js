@@ -6,6 +6,51 @@ if (!window.BlockEditor) {
 
 const BlockEditor = window.BlockEditor;
 
+// ── Obsidian / GFM Import Helpers ────────────────────────────
+
+BlockEditor.importObsidian = function(markdown) {
+  if (!markdown) return [];
+
+  // Pre-process: Obsidian callouts
+  var text = markdown.replace(/^>\s*\[!(\w+)\]\s*(.*?)(?:\n>|$)/g, function(m, type, title) {
+    var icons = { note: '✏', warning: '⚠', tip: '💡', info: 'ℹ', danger: '🔥', abstract: '📋', todo: '☐', success: '✅', question: '❓', failure: '❌', example: '📐', quote: '❝' };
+    var icon = icons[type.toLowerCase()] || '💡';
+    return '<!-- callout -->\n> ' + icon + (title ? ' ' + title : '');
+  });
+
+  // Pre-process: wikilinks [[page]] → [page](page:page-id)
+  text = text.replace(/\[\[([^\]]+)\]\]/g, function(m, page) {
+    var parts = page.split('|');
+    var target = parts[0].trim();
+    var label = (parts[1] || parts[0]).trim();
+    return '[' + label + '](page:' + target + ')';
+  });
+
+  // Pre-process: tags #tag → inline code style
+  text = text.replace(/(?:^|\s)#([a-zA-Z][\w/-]*)/g, function(m, tag) {
+    return ' `#' + tag + '`';
+  });
+
+  return BlockEditor.parseMarkdown(text);
+};
+
+BlockEditor.importNotion = function(markdown) {
+  if (!markdown) return [];
+
+  var text = markdown;
+  // Notion toggle: ▶ then content
+  text = text.replace(/^(\s*)▶\s*(.+)/gm, function(m, indent, title) {
+    return '<!-- toggle -->\n<details>\n<summary>' + title + '</summary>\n';
+  });
+  text = text.replace(/<\/details>/g, '<!-- end toggle -->');
+  // Notion callout with emoji
+  text = text.replace(/^>\s*(💡|⚠|ℹ|🔥|✅|❌|📋|✏)\s*(.*)/gm, function(m, icon, content) {
+    return '<!-- callout -->\n> ' + icon + (content ? ' ' + content : '');
+  });
+
+  return BlockEditor.parseMarkdown(text);
+};
+
 // ── Block Type Registry ───────────────────────────────────────
 
 BlockEditor.TYPES = [
@@ -53,6 +98,26 @@ function cloneMeta(meta) {
 function fileNameFromPath(filePath) {
   if (!filePath) return '';
   return filePath.replace(/\\/g, '/').split('/').pop() || filePath;
+}
+
+function splitTableCells(row) {
+  const cells = [];
+  let current = '';
+  for (let i = 0; i < row.length; i++) {
+    if (row[i] === '\\' && row[i + 1] === '|') { current += '|'; i++; }
+    else if (row[i] === '|') { cells.push(current); current = ''; }
+    else { current += row[i]; }
+  }
+  if (current || row[row.length - 1] === '|') cells.push(current);
+  return cells;
+}
+
+function unescapeTableCell(cell) {
+  return (cell || '').replace(/\\\|/g, '|');
+}
+
+function escapeTableCell(cell) {
+  return (cell || '').replace(/\|/g, '\\|');
 }
 
 function asFileUrl(filePath) {
@@ -433,7 +498,7 @@ function firstEmbeddedStandaloneBlockIndex(text) {
 BlockEditor.parseMarkdown = function(markdown) {
   if (!markdown || !markdown.trim()) return [];
   const lines = markdown.split('\n');
-  const blocks = [];
+  let blocks = [];
   let i = 0;
 
   while (i < lines.length) {
@@ -638,8 +703,46 @@ BlockEditor.parseMarkdown = function(markdown) {
     }
     blocks.push({ id: BlockEditor.nextId(), type: 'text', content: textContent });
   }
+
+  blocks = detectBareUrls(blocks);
+
   return blocks;
 };
+
+function detectBareUrls(blocks) {
+  const urlRegex = /(?:^|\s)(https?:\/\/[^\s<>"{}|\\^`[\]]+)/g;
+  const result = [];
+  for (const block of blocks) {
+    if (block.type !== 'text' || !block.content) { result.push(block); continue; }
+    const matches = [];
+    let m;
+    while ((m = urlRegex.exec(block.content)) !== null) {
+      matches.push({ url: m[1], index: m.index + m[0].indexOf(m[1]) });
+    }
+    if (!matches.length) { result.push(block); continue; }
+    let last = 0;
+    const parts = [];
+    for (const match of matches) {
+      if (match.index > last) {
+        parts.push({ type: 'text', content: block.content.slice(last, match.index).trim() });
+      }
+      parts.push({ type: 'bookmark', content: match.url.replace(/^https?:\/\//, ''), meta: { url: match.url } });
+      last = match.index + match.url.length;
+    }
+    if (last < block.content.length) {
+      const trailing = block.content.slice(last).trim();
+      if (trailing) parts.push({ type: 'text', content: trailing });
+    }
+    for (const part of parts) {
+      if (part.type === 'text') {
+        result.push({ id: block.id, type: 'text', content: part.content, meta: cloneMeta(block.meta) });
+      } else {
+        result.push({ id: BlockEditor.nextId(), type: 'bookmark', content: part.content, meta: part.meta });
+      }
+    }
+  }
+  return result;
+}
 
 // ── Blocks → Markdown Serializer ─────────────────────────────
 
@@ -1005,8 +1108,8 @@ BlockEditor.renderBlock = function(block, isEditable = true) {
         const rows = block.content.split('\n').filter(r => r.trim());
         for (let ri = 0; ri < rows.length; ri++) {
           const tr = document.createElement('tr');
-          const cells = rows[ri].split('|').filter(c => c.trim());
-          if (ri === 1 && /^[-| ]+$/.test(cells.join(''))) continue; // separator
+          const cells = splitTableCells(rows[ri]);
+          if (ri === 1 && /^[-: ]+$/.test(cells.join(''))) continue;
           for (const cell of cells) {
             const td = document.createElement(ri === 0 ? 'th' : 'td');
             td.textContent = cell.trim();
@@ -1260,26 +1363,43 @@ BlockEditor.renderBlock = function(block, isEditable = true) {
 
 // ── Inline Content Rendering ──────────────────────────────────
 
+function formatStars(text) {
+  var out = '', i = 0;
+  while (i < text.length) {
+    if (text.substr(i, 3) === '***') {
+      var c = text.indexOf('***', i + 3);
+      if (c !== -1) { out += '<strong><em>' + formatStars(text.slice(i + 3, c)) + '</em></strong>'; i = c + 3; continue; }
+    }
+    if (text.substr(i, 2) === '**') {
+      var c = text.indexOf('**', i + 2);
+      if (c !== -1) { out += '<strong>' + formatStars(text.slice(i + 2, c)) + '</strong>'; i = c + 2; continue; }
+    }
+    if (text[i] === '*' && text[i+1] !== '*' && text[i-1] !== '*') {
+      var c = text.indexOf('*', i + 1);
+      while (c !== -1 && text[c-1] === '*') c = text.indexOf('*', c + 1);
+      if (c !== -1 && text[c+1] !== '*') { out += '<em>' + formatStars(text.slice(i + 1, c)) + '</em>'; i = c + 1; continue; }
+    }
+    out += text[i]; i++;
+  }
+  return out;
+}
+
 function renderInlineContent(text) {
   if (!text) return '';
-  let html = text
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  var html = text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  html = formatStars(html);
+  html = html
     // Inline math $...$ → styled span
     .replace(/\$\$?(.+?)\$\$?/g, '<code class="inline-code" style="font-style:italic;">$1</code>')
     // Inline code `...`
     .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
-    // Bold + italic ***...***
-    .replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>')
-    // Bold **...**
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    // Italic *...*
-    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
     // Strikethrough ~~...~~
-    .replace(/~~([^~]+)~~/g, '<del>$1</del>')
+    .replace(/~~(.+?)~~/g, '<del>$1</del>')
     // Images ![alt](url) — inline
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (m, alt, url) => {
-      const src = url.trim();
-      return `<img src="${src}" alt="${alt}" style="max-height:1.5em;max-width:100%;vertical-align:middle;border-radius:3px;">`;
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function(m, alt, url) {
+      var src = url.trim();
+      return '<img src="' + src + '" alt="' + alt + '" style="max-height:1.5em;max-width:100%;vertical-align:middle;border-radius:3px;">';
     })
     // Links [text](url)
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
@@ -1365,11 +1485,11 @@ BlockEditor.readBlock = function(blockEl) {
           for (const tr of trs) {
             const cells = [];
             const tds = tr.querySelectorAll('th, td');
-            for (const td of tds) cells.push(td.textContent.trim());
+            for (const td of tds) cells.push(escapeTableCell(td.textContent.trim()));
             rows.push('| ' + cells.join(' | ') + ' |');
           }
           if (rows.length > 1) {
-            const cols = rows[1].split('|').filter(c => c.trim()).length;
+            const cols = splitTableCells(rows[0]).filter(function(c) { return true; }).length;
             rows.splice(1, 0, '|' + Array(cols).fill(' --- ').join('|') + '|');
           }
         }

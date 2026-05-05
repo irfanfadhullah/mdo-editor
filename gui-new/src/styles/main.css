@@ -82,6 +82,67 @@
   }
 }
 
+/* Force dark theme (toggled by JS) */
+html[data-theme="dark"] {
+  --bg-primary: #1c1c1e;
+  --bg-secondary: #2c2c2e;
+  --bg-tertiary: #3a3a3c;
+  --bg-sidebar: #252526;
+  --bg-toolbar: rgba(28, 28, 30, 0.92);
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-selected: rgba(10, 132, 255, 0.16);
+  --bg-active: rgba(10, 132, 255, 0.24);
+  --text-primary: #f5f5f7;
+  --text-secondary: #98989d;
+  --text-tertiary: #636366;
+  --text-placeholder: #48484a;
+  --accent: #0a84ff;
+  --accent-hover: #409cff;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.4);
+}
+
+/* Force light theme (toggled by JS) */
+html[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f5f7;
+  --bg-tertiary: #e8e8ed;
+  --bg-sidebar: #f0f0f3;
+  --bg-toolbar: rgba(255, 255, 255, 0.92);
+  --bg-hover: rgba(0, 0, 0, 0.04);
+  --bg-selected: rgba(0, 122, 255, 0.08);
+  --bg-active: rgba(0, 122, 255, 0.14);
+  --text-primary: #1d1d1f;
+  --text-secondary: #6e6e73;
+  --text-tertiary: #aeaeb2;
+  --text-placeholder: #c7c7cc;
+  --accent: #007aff;
+  --accent-hover: #0066d6;
+  --border: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.12);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.12);
+}
+
+/* ── Theme Toggle Button ─────────────────────────────────────── */
+.theme-toggle-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  transition: background 0.15s ease;
+  cursor: pointer;
+  font-size: 14px;
+}
+.theme-toggle-btn:hover { background: var(--bg-hover); }
+
 /* ── Reset ──────────────────────────────────────────────────── */
 
 *, *::before, *::after {
@@ -342,6 +403,54 @@ a:hover { text-decoration: underline; }
 .tree-children {
   padding-left: 16px;
 }
+
+/* ── Find / Replace Bar ─────────────────────────────────────── */
+.find-bar {
+  position: absolute;
+  top: 0;
+  right: 20px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: var(--bg-toolbar);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 0.5px solid var(--border-strong);
+  border-top: none;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.find-bar input {
+  padding: 3px 8px;
+  font-size: var(--font-size-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  width: 160px;
+}
+
+.find-bar input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.find-btn {
+  padding: 3px 8px;
+  font-size: var(--font-size-xs);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+}
+
+.find-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.find-close { font-size: 15px; padding: 2px 7px; }
 
 /* ── Content Area ───────────────────────────────────────────── */
 

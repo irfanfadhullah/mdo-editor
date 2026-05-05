@@ -220,6 +220,15 @@ function setupIPC() {
     }
   });
 
+  ipcMain.handle('fs:writeBase64', async (_, filePath, base64) => {
+    try {
+      fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
+      return { ok: true };
+    } catch (err) {
+      return { error: err.message };
+    }
+  });
+
   ipcMain.handle('fs:writeMdoArchive', async (_, filePath, payload) => {
     try {
       writeMdoArchive(filePath, payload || {});
@@ -267,6 +276,52 @@ function setupIPC() {
 
   ipcMain.handle('shell:openInBrowser', async (_, url) => {
     shell.openExternal(url);
+  });
+
+  ipcMain.handle('export:pdf', async (_, html, title) => {
+    return new Promise((resolve, reject) => {
+      const pdfWin = new BrowserWindow({
+        show: false,
+        width: 800,
+        height: 600,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          sandbox: false,
+        },
+      });
+      const htmlWithTitle = html.replace('<title></title>', '<title>' + (title || 'Untitled') + '</title>');
+      pdfWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(htmlWithTitle));
+      pdfWin.webContents.on('did-finish-load', () => {
+        pdfWin.webContents.printToPDF({
+          printBackground: true,
+          marginsType: 1,
+          pageSize: 'A4',
+        }).then((data) => {
+          pdfWin.close();
+          resolve(data.toString('base64'));
+        }).catch((err) => {
+          pdfWin.close();
+          reject(err);
+        });
+      });
+    });
+  });
+
+  ipcMain.handle('export:docx', async (_, blocks, title) => {
+    try {
+      var xml = renderDocxXml(blocks, title);
+      var savePath = await dialog.showSaveDialog(mainWindow, {
+        title: 'Export DOCX',
+        defaultPath: (title || 'untitled') + '.docx',
+        filters: [{ name: 'Word Document', extensions: ['docx'] }],
+      });
+      if (!savePath || savePath.canceled) return null;
+      writeDocxFile(savePath.filePath || savePath, xml);
+      return savePath.filePath || savePath;
+    } catch (err) {
+      return { error: err.message };
+    }
   });
 
   ipcMain.handle('media:getDataUrl', async (_, filePath) => {
@@ -373,3 +428,50 @@ app.on('open-file', (event, filePath) => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
+
+// --- DOCX helpers ---
+
+function escapeXml(str) {
+  return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function renderDocxBlockXml(block) {
+  var type = block.type;
+  var content = (block.content || '').trim();
+  var meta = block.meta || {};
+  switch (type) {
+    case 'heading-1': return '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>' + escapeXml(content) + '</w:t></w:r></w:p>';
+    case 'heading-2': return '<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>' + escapeXml(content) + '</w:t></w:r></w:p>';
+    case 'heading-3': return '<w:p><w:pPr><w:pStyle w:val="Heading3"/></w:pPr><w:r><w:t>' + escapeXml(content) + '</w:t></w:r></w:p>';
+    case 'bulleted-list': return '<w:p><w:pPr><w:pStyle w:val="ListBullet"/></w:pPr><w:r><w:t>' + escapeXml(content) + '</w:t></w:r></w:p>';
+    case 'numbered-list': return '<w:p><w:pPr><w:pStyle w:val="ListNumber"/></w:pPr><w:r><w:t>' + escapeXml(content) + '</w:t></w:r></w:p>';
+    case 'todo-list': return '<w:p><w:r><w:t>' + (meta.checked ? '☒ ' : '☐ ') + escapeXml(content) + '</w:t></w:r></w:p>';
+    case 'quote': return '<w:p><w:pPr><w:pStyle w:val="Quote"/></w:pPr><w:r><w:t>' + escapeXml(content) + '</w:t></w:r></w:p>';
+    case 'code': return '<w:p><w:pPr><w:shd w:fill="F5F5F7" w:val="clear"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/></w:rPr><w:t xml:space="preserve">' + escapeXml(content) + '</w:t></w:r></w:p>';
+    case 'callout': return '<w:p><w:pPr><w:shd w:fill="EDF4FF" w:val="clear"/></w:pPr><w:r><w:t>' + (meta.icon || '💡') + ' ' + escapeXml(content) + '</w:t></w:r></w:p>';
+    case 'divider': return '<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="D9D9D9"/></w:pBdr></w:pPr></w:p>';
+    case 'image': return '<w:p><w:r><w:t>' + escapeXml(content || '[Image]') + '</w:t></w:r></w:p>';
+    case 'equation': return '<w:p><w:r><w:t>' + escapeXml(content) + '</w:t></w:r></w:p>';
+    default:
+      return content.split('\n').map(function(line) {
+        return '<w:p><w:r><w:t xml:space="preserve">' + escapeXml(line || ' ') + '</w:t></w:r></w:p>';
+      }).join('');
+  }
+}
+
+function renderDocxXml(blocks, title) {
+  var body = '';
+  for (var i = 0; i < (blocks || []).length; i++) body += renderDocxBlockXml(blocks[i]);
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>' + body + '</w:body></w:document>';
+}
+
+function writeDocxFile(filePath, docXml) {
+  var AdmZip = require('adm-zip');
+  var zip = new AdmZip();
+  zip.addFile('[Content_Types].xml', Buffer.from(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>', 'utf8'));
+  zip.addFile('_rels/.rels', Buffer.from(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>', 'utf8'));
+  zip.addFile('word/document.xml', Buffer.from(docXml, 'utf8'));
+  zip.writeZip(filePath);
+}

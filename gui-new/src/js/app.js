@@ -4,6 +4,27 @@ if (!window.mdoAPI) throw new Error('mdoAPI not found');
 
 const $ = (sel, ctx = document) => ctx.querySelector(sel);
 
+// ── Theme ─────────────────────────────────────────────────────
+
+(function initTheme() {
+  const saved = localStorage.getItem('mdo-theme');
+  if (saved === 'dark') {
+    document.documentElement.setAttribute('data-theme', 'dark');
+  } else if (saved === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
+})();
+
+function toggleTheme() {
+  const html = document.documentElement;
+  const current = html.getAttribute('data-theme');
+  const next = current === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  localStorage.setItem('mdo-theme', next);
+  const btn = $('#btn-theme-toggle');
+  if (btn) btn.textContent = next === 'dark' ? '☀' : '🌙';
+}
+
 // ── State ─────────────────────────────────────────────────────
 
 const state = {
@@ -11,6 +32,7 @@ const state = {
   activeTabId: null,
   previousTabId: null,
   currentFolder: null,
+  fileStatus: 'clean',
   _saveTimer: null,
 };
 
@@ -25,6 +47,8 @@ const els = {
   outlineList: $('#outline-list'),
   outlineEmpty: $('#outline-empty'),
   toolbarPath: $('#toolbar-path'),
+  saveIndicator: $('#save-indicator'),
+  statusBar: $('#block-status-bar'),
   dropOverlay: $('#drop-overlay'),
 };
 
@@ -55,10 +79,12 @@ function switchTab(tabId) {
     state.previousTabId = state.activeTabId;
   }
   state.activeTabId = tabId;
+  if (window.UndoRedo) window.UndoRedo.clear();
   const tab = activeTab();
   if (!tab) return;
   renderAllBlocks(tab.blocks);
   updateOutline();
+  updateStatusBar();
   renderTabs();
   els.toolbarPath.textContent = tab.filePath ? tab.filePath.split('/').pop() : tab.fileName;
   updateToolbarButtons(tab.filePath);
@@ -304,6 +330,49 @@ function setupBlockListeners(blockEl, index) {
     blockEl.classList.add('selected');
   });
 
+  // Drag handle for reorder
+  const handle = blockEl.querySelector('.block-handle');
+  if (handle) {
+    handle.setAttribute('draggable', 'true');
+    handle.addEventListener('dragstart', function(e) {
+      if (!editMode) { e.preventDefault(); return; }
+      blockEl.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(index));
+    });
+    handle.addEventListener('dragend', function() { blockEl.classList.remove('dragging'); });
+    if (isHeadingBlock(blockEl)) {
+      handle.addEventListener('dblclick', function(e) { e.preventDefault(); e.stopPropagation(); toggleFoldSection(blockEl, index); });
+      handle.title = 'Drag to reorder · Double-click to fold';
+    }
+  }
+
+  blockEl.addEventListener('dragover', function(e) {
+    if (!editMode) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    blockEl.classList.add('drag-over');
+  });
+  blockEl.addEventListener('dragleave', function() { blockEl.classList.remove('drag-over'); });
+  blockEl.addEventListener('drop', function(e) {
+    if (!editMode) return;
+    e.preventDefault();
+    blockEl.classList.remove('drag-over');
+    var fromIdx = parseInt(e.dataTransfer.getData('text/plain'), 10);
+    var toIdx = index;
+    if (isNaN(fromIdx) || fromIdx === toIdx) return;
+    readAllBlocks();
+    var tab = activeTab();
+    if (!tab) return;
+    var moved = tab.blocks.splice(fromIdx, 1)[0];
+    if (moved) {
+      var adjustedTo = fromIdx < toIdx ? toIdx - 1 : toIdx;
+      tab.blocks.splice(adjustedTo, 0, moved);
+      renderAllBlocks(tab.blocks);
+      updateOutline();
+    }
+  });
+
   // Slash menu
   if (contentEl.contentEditable === 'true') {
     contentEl.addEventListener('input', () => {
@@ -452,9 +521,14 @@ function reindex() {
 
 function blockChanged() {
   clearTimeout(state._saveTimer);
+  state.fileStatus = 'modified';
+  updateSaveIndicator();
   state._saveTimer = setTimeout(() => {
+    var tab = activeTab();
+    var prev = tab ? JSON.parse(JSON.stringify(tab.blocks)) : [];
     readAllBlocks();
     updateOutline();
+    if (window.UndoRedo) window.UndoRedo.recordChange(prev);
   }, 300);
 }
 
@@ -491,6 +565,30 @@ function handlePageNavigate(e) {
 
 els.blockEditorInner.addEventListener('page-navigate', handlePageNavigate);
 
+// ── Status Bar ────────────────────────────────────────────────
+
+function updateStatusBar() {
+  var tab = activeTab();
+  var blocks = tab ? tab.blocks : [];
+  var count = blocks.length;
+  var headings = blocks.filter(function(b) { return ['heading-1','heading-2','heading-3'].includes(b.type); }).length;
+  var totalText = '';
+  for (var i = 0; i < blocks.length; i++) totalText += (blocks[i].content || '') + ' ';
+  var words = totalText.trim() ? totalText.trim().split(/\s+/).length : 0;
+  els.statusBar.textContent = count + ' blocks  ·  ' + words + ' words  ·  ' + headings + ' headings';
+  els.statusBar.style.display = count > 0 ? '' : 'none';
+  updateSaveIndicator();
+}
+
+function updateSaveIndicator() {
+  var ind = els.saveIndicator;
+  if (!ind) return;
+  if (state.fileStatus === 'saving') { ind.textContent = '● Saving…'; ind.style.color = 'var(--text-tertiary)'; ind.style.display = ''; }
+  else if (state.fileStatus === 'modified') { ind.textContent = '● Modified'; ind.style.color = 'var(--accent)'; ind.style.display = ''; }
+  else if (state.fileStatus === 'saved') { ind.textContent = '✓ Saved'; ind.style.color = 'var(--text-secondary)'; ind.style.display = ''; setTimeout(function() { ind.style.display = 'none'; }, 2000); }
+  else ind.style.display = 'none';
+}
+
 // ── Outline (Headings) ────────────────────────────────────────
 
 function updateOutline() {
@@ -504,27 +602,27 @@ function updateOutline() {
     outlineList.innerHTML = '';
     outlineList.appendChild(outlineEmpty);
     outlineEmpty.style.display = '';
-    return;
+  } else {
+    outlineEmpty.style.display = 'none';
+    outlineList.innerHTML = '';
+    for (let i = 0; i < headings.length; i++) {
+      const h = headings[i];
+      const blockIndex = blocks.indexOf(h);
+      const item = document.createElement('div');
+      const displayClass = h.type === 'heading-1' ? 'h1' : h.type === 'heading-2' ? 'h2' : 'h3';
+      item.className = 'outline-item ' + displayClass;
+      item.textContent = stripMarkdown(h.content) || '(empty)';
+      item.addEventListener('click', () => {
+        const blockEl = els.blockEditorInner.querySelectorAll('.block')[blockIndex];
+        if (blockEl) {
+          blockEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          focusBlock(blockEl);
+        }
+      });
+      outlineList.appendChild(item);
+    }
   }
-
-  outlineEmpty.style.display = 'none';
-  outlineList.innerHTML = '';
-
-  for (let i = 0; i < headings.length; i++) {
-    const h = headings[i];
-    const blockIndex = blocks.indexOf(h);
-    const item = document.createElement('div');
-    item.className = 'outline-item ' + h.type;
-    item.textContent = stripMarkdown(h.content) || '(empty)';
-    item.addEventListener('click', () => {
-      const blockEl = els.blockEditorInner.querySelectorAll('.block')[blockIndex];
-      if (blockEl) {
-        blockEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        focusBlock(blockEl);
-      }
-    });
-    outlineList.appendChild(item);
-  }
+  updateStatusBar();
 }
 
 function stripMarkdown(text) {
@@ -561,6 +659,10 @@ $('#btn-edit-toggle').addEventListener('click', () => {
 $('#btn-refresh').addEventListener('click', () => {
   if (state.currentFolder) navigateFolder(state.currentFolder);
 });
+$('#btn-theme-toggle').addEventListener('click', toggleTheme);
+$('#btn-export-html').addEventListener('click', exportHTML);
+$('#btn-export-pdf').addEventListener('click', exportPDF);
+$('#btn-export-docx').addEventListener('click', exportDOCX);
 
 function newDocument() {
   const tab = createTab(null, [{ id: BlockEditor.nextId(), type: 'text', content: '', meta: {} }]);
@@ -744,6 +846,8 @@ async function saveCurrentFile() {
     : await window.mdoAPI.writeFile(savePath, BlockEditor.serializeMarkdown(tab.blocks));
   if (result.error) { showError('Save failed: ' + result.error); return; }
 
+  state.fileStatus = 'saved';
+  updateSaveIndicator();
   tab.filePath = savePath;
   tab.fileName = savePath.split('/').pop();
   tab.archivePath = isMdo ? savePath : null;
@@ -776,6 +880,93 @@ async function extractArchive() {
   showError('Extracted to ' + outDir);
 }
 
+async function exportHTML() {
+  var tab = activeTab();
+  if (!tab) return;
+  readAllBlocks();
+  var html = window.ExportHTML.renderHtmlDoc(tab.blocks, tab.fileName || 'Untitled');
+  var savePath = await window.mdoAPI.saveFile({
+    title: 'Export HTML',
+    defaultPath: (tab.fileName || 'untitled').replace(/\.[^.]+$/, '') + '.html',
+    filters: [{ name: 'HTML', extensions: ['html', 'htm'] }],
+  });
+  if (!savePath) return;
+  await window.mdoAPI.writeExportFile(savePath, html);
+  state.fileStatus = 'saved';
+  updateSaveIndicator();
+}
+
+async function exportPDF() {
+  var tab = activeTab();
+  if (!tab) return;
+  readAllBlocks();
+  if (!window.ExportHTML) return;
+  var html = window.ExportHTML.renderHtmlDoc(tab.blocks, tab.fileName || 'Untitled');
+  try {
+    var base64 = await window.mdoAPI.printToPDF(html, tab.fileName || 'Untitled');
+    if (!base64) { showError('PDF export failed'); return; }
+    var savePath = await window.mdoAPI.saveFile({
+      title: 'Export PDF',
+      defaultPath: (tab.fileName || 'untitled').replace(/\.[^.]+$/, '') + '.pdf',
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (!savePath) return;
+    var result = await window.mdoAPI.writeBase64(savePath, base64);
+    if (result && result.error) { showError('PDF export failed: ' + result.error); return; }
+    state.fileStatus = 'saved';
+    updateSaveIndicator();
+  } catch (e) {
+    showError('PDF export failed: ' + (e.message || e));
+  }
+}
+
+async function exportDOCX() {
+  var tab = activeTab();
+  if (!tab) return;
+  readAllBlocks();
+  var result = await window.mdoAPI.exportDOCX(tab.blocks, tab.fileName || 'Untitled');
+  if (result && result.error) showError('DOCX export failed: ' + result.error);
+}
+
+async function handlePaste(e) {
+  if (!navigator.clipboard || !navigator.clipboard.read) return;
+  try {
+    var items = await navigator.clipboard.read();
+    for (var i = 0; i < items.length; i++) {
+      var types = items[i].types;
+      for (var j = 0; j < types.length; j++) {
+        if (types[j].startsWith('image/')) {
+          e.preventDefault();
+          var blob = await items[i].getType(types[j]);
+          var reader = new FileReader();
+          reader.onload = function() {
+            var tab = activeTab();
+            if (!tab) return;
+            var idx = getActiveBlockIndex();
+            tab.blocks.splice(idx + 1, 0, {
+              id: BlockEditor.nextId(),
+              type: 'image',
+              content: 'Pasted image',
+              meta: { src: reader.result },
+            });
+            renderAllBlocks(tab.blocks);
+            updateOutline();
+          };
+          reader.readAsDataURL(blob);
+          return;
+        }
+      }
+    }
+  } catch (_) {}
+}
+
+function getActiveBlockIndex() {
+  var blocks = els.blockEditorInner.querySelectorAll('.block');
+  var sel = document.querySelector('.block.selected');
+  if (sel) return Array.from(blocks).indexOf(sel);
+  return blocks.length - 1;
+}
+
 // ── Toolbar State ─────────────────────────────────────────────
 
 function updateToolbarButtons(filePath) {
@@ -787,6 +978,15 @@ function updateToolbarButtons(filePath) {
 // ── Keyboard Shortcuts ────────────────────────────────────────
 
 document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'v') {
+    if (!editMode) return;
+    handlePaste(e);
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+    e.preventDefault();
+    openFindBar();
+    return;
+  }
   if ((e.metaKey || e.ctrlKey) && e.key === 's') {
     e.preventDefault();
     saveCurrentFile();
@@ -799,7 +999,28 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     newDocument();
   }
+  if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+    if (e.shiftKey) {
+      e.preventDefault();
+      applyUndoRedo(window.UndoRedo && window.UndoRedo.redo());
+    } else {
+      e.preventDefault();
+      applyUndoRedo(window.UndoRedo && window.UndoRedo.undo());
+    }
+  }
 });
+
+function applyUndoRedo(stateJSON) {
+  if (!stateJSON) return;
+  var tab = activeTab();
+  if (!tab) return;
+  try {
+    var blocks = JSON.parse(stateJSON);
+    tab.blocks = blocks;
+    renderAllBlocks(blocks);
+    updateOutline();
+  } catch (e) { /* ignore */ }
+}
 
 // ── Sidebar: File Explorer ────────────────────────────────────
 
@@ -995,9 +1216,182 @@ els.blockEditorInner.parentElement?.addEventListener('contextmenu', (e) => {
         }
       } catch (_) {}
     }});
+    items.push({ label: 'Paste Image', action: async () => {
+      if (!navigator.clipboard || !navigator.clipboard.read) return;
+      try {
+        var clipItems = await navigator.clipboard.read();
+        for (var i = 0; i < clipItems.length; i++) {
+          var types = clipItems[i].types;
+          for (var j = 0; j < types.length; j++) {
+            if (types[j].startsWith('image/')) {
+              var blob = await clipItems[i].getType(types[j]);
+              var reader = new FileReader();
+              reader.onload = function() {
+                var tab = activeTab();
+                if (!tab) return;
+                var idx = getActiveBlockIndex();
+                tab.blocks.splice(idx + 1, 0, {
+                  id: BlockEditor.nextId(),
+                  type: 'image',
+                  content: 'Pasted image',
+                  meta: { src: reader.result },
+                });
+                renderAllBlocks(tab.blocks);
+                updateOutline();
+              };
+              reader.readAsDataURL(blob);
+              return;
+            }
+          }
+        }
+      } catch (_) {}
+    }});
   }
   if (items.length > 0) showContextMenu(e.clientX, e.clientY, items);
 });
+
+// ── Find / Replace ────────────────────────────────────────────
+
+var findMatches = [];
+var findIndex = -1;
+
+function openFindBar() {
+  var bar = $('#find-bar');
+  bar.style.display = 'flex';
+  $('#find-input').focus();
+  $('#find-input').select();
+  if (!$('#find-input')._bound) {
+    $('#find-input')._bound = true;
+    $('#find-input').addEventListener('input', doFind);
+    $('#btn-find-prev').addEventListener('click', function() { navigateFind(-1); });
+    $('#btn-find-next').addEventListener('click', function() { navigateFind(1); });
+    $('#btn-replace-one').addEventListener('click', doReplaceOne);
+    $('#btn-replace-all').addEventListener('click', doReplaceAll);
+    $('#btn-find-close').addEventListener('click', closeFindBar);
+    $('#replace-input').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') doReplaceOne();
+    });
+    $('#find-input').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { e.preventDefault(); navigateFind(e.shiftKey ? -1 : 1); }
+      if (e.key === 'Escape') closeFindBar();
+    });
+  }
+}
+
+function closeFindBar() { $('#find-bar').style.display = 'none'; clearFindHighlights(); }
+
+function doFind() {
+  clearFindHighlights(); findMatches = []; findIndex = -1;
+  var query = $('#find-input').value;
+  if (!query) { $('#find-count').textContent = ''; return; }
+  var blocks = els.blockEditorInner.querySelectorAll('.block');
+  var qLower = query.toLowerCase();
+  blocks.forEach(function(block) {
+    var editables = block.querySelectorAll('[contenteditable="true"]');
+    editables.forEach(function(ed) {
+      var text = ed.textContent || ''; var idx = -1;
+      while ((idx = text.toLowerCase().indexOf(qLower, idx + 1)) !== -1) {
+        findMatches.push({ block: block, editable: ed, index: idx, length: query.length });
+      }
+    });
+  });
+  $('#find-count').textContent = findMatches.length ? (findMatches.length + ' matches') : 'No matches';
+  if (findMatches.length > 0) navigateFind(1);
+}
+
+function highlightMatch() {
+  clearFindHighlights();
+  if (findIndex < 0 || findIndex >= findMatches.length) return;
+  var m = findMatches[findIndex];
+  var range = document.createRange();
+  var textNode = findTextNode(m.editable, m.index);
+  if (!textNode) return;
+  range.setStart(textNode, m.index - offsetInEditable(m.editable, textNode));
+  range.setEnd(textNode, range.startOffset + m.length);
+  var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+  m.editable.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  $('#find-count').textContent = (findIndex + 1) + ' of ' + findMatches.length;
+}
+
+function findTextNode(el, offset) {
+  var current = 0;
+  var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  var node;
+  while ((node = walker.nextNode())) {
+    if (current + node.textContent.length > offset) return node;
+    current += node.textContent.length;
+  }
+  return null;
+}
+
+function offsetInEditable(el, textNode) {
+  var offset = 0;
+  var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  var node;
+  while ((node = walker.nextNode())) { if (node === textNode) return offset; offset += node.textContent.length; }
+  return offset;
+}
+
+function navigateFind(direction) {
+  if (!findMatches.length) return;
+  findIndex += direction;
+  if (findIndex < 0) findIndex = findMatches.length - 1;
+  if (findIndex >= findMatches.length) findIndex = 0;
+  highlightMatch();
+}
+
+function clearFindHighlights() { var sel = window.getSelection(); if (sel) sel.removeAllRanges(); }
+
+function doReplaceOne() {
+  if (findIndex < 0 || findIndex >= findMatches.length) return;
+  var replaceText = $('#replace-input').value || '';
+  var m = findMatches[findIndex];
+  var textNode = findTextNode(m.editable, m.index);
+  if (!textNode) return;
+  var localIdx = m.index - offsetInEditable(m.editable, textNode);
+  textNode.textContent = textNode.textContent.slice(0, localIdx) + replaceText + textNode.textContent.slice(localIdx + m.length);
+  m.editable.dispatchEvent(new Event('input', { bubbles: true }));
+  doFind();
+}
+
+function doReplaceAll() {
+  if (!findMatches.length) return;
+  var replaceText = $('#replace-input').value || '';
+  for (var i = findMatches.length - 1; i >= 0; i--) {
+    var m = findMatches[i];
+    var textNode = findTextNode(m.editable, m.index);
+    if (!textNode) continue;
+    var localIdx = m.index - offsetInEditable(m.editable, textNode);
+    textNode.textContent = textNode.textContent.slice(0, localIdx) + replaceText + textNode.textContent.slice(localIdx + m.length);
+  }
+  readAllBlocks(); var tab = activeTab(); if (tab) renderAllBlocks(tab.blocks);
+  findMatches = []; findIndex = -1; $('#find-count').textContent = 'Replaced all';
+}
+
+// ── Block Folding ──────────────────────────────────────────────
+
+function isHeadingBlock(blockEl) {
+  var t = blockEl.dataset.blockType;
+  return t === 'heading-1' || t === 'heading-2' || t === 'heading-3';
+}
+
+function getHeadingLevel(blockEl) {
+  var t = blockEl.dataset.blockType;
+  if (t === 'heading-1') return 1; if (t === 'heading-2') return 2; if (t === 'heading-3') return 3;
+  return 0;
+}
+
+function toggleFoldSection(headingEl, index) {
+  var folded = headingEl.classList.toggle('folded');
+  var level = getHeadingLevel(headingEl);
+  var allBlocks = els.blockEditorInner.querySelectorAll('.block');
+  for (var i = index + 1; i < allBlocks.length; i++) {
+    var b = allBlocks[i];
+    if (isHeadingBlock(b) && getHeadingLevel(b) <= level) break;
+    if (folded) b.classList.add('hidden-by-fold');
+    else b.classList.remove('hidden-by-fold');
+  }
+}
 
 // ── IPC Events ────────────────────────────────────────────────
 
@@ -1011,6 +1405,14 @@ window.mdoAPI.onOpenFile((filePath) => {
 
 function init() {
   initResizers();
+  if (window.UndoRedo) {
+    window.UndoRedo.init(
+      function() { var t = activeTab(); return t ? JSON.parse(JSON.stringify(t.blocks)) : []; },
+      function(blocks) { var t = activeTab(); if (t) { t.blocks = blocks; renderAllBlocks(blocks); } }
+    );
+  }
+  var themeBtn = $('#btn-theme-toggle');
+  if (themeBtn) themeBtn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀' : '🌙';
   newDocument();
 }
 
