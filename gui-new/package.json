@@ -15,7 +15,9 @@
     "build:mac": "electron-builder --mac"
   },
   "dependencies": {
-    "adm-zip": "^0.5.16"
+    "adm-zip": "^0.5.16",
+    "katex": "^0.16.45",
+    "mermaid": "^11.15.0"
   },
   "devDependencies": {
     "electron": "^33.0.0",
@@ -31,7 +33,10 @@
       "src/**/*"
     ],
     "linux": {
-      "target": ["deb", "AppImage"],
+      "target": [
+        "deb",
+        "AppImage"
+      ],
       "category": "Office",
       "icon": "build/icons",
       "maintainer": "MDO Viewer Team",

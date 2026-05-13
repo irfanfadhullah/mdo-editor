@@ -46,6 +46,22 @@ function buildAppMenu() {
         { role: 'copy' },
         { role: 'paste' },
         { role: 'selectAll' },
+        { type: 'separator' },
+        {
+          label: 'Find',
+          accelerator: 'CmdOrCtrl+F',
+          click: () => mainWindow && mainWindow.webContents.send('menu:find'),
+        },
+        {
+          label: 'Find Next',
+          accelerator: 'CmdOrCtrl+G',
+          click: () => mainWindow && mainWindow.webContents.send('menu:findNext'),
+        },
+        {
+          label: 'Find Previous',
+          accelerator: 'CmdOrCtrl+Shift+G',
+          click: () => mainWindow && mainWindow.webContents.send('menu:findPrev'),
+        },
       ],
     },
     {
@@ -55,9 +71,21 @@ function buildAppMenu() {
         { role: 'forceReload' },
         { role: 'toggleDevTools' },
         { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
+        {
+          label: 'Actual Size',
+          accelerator: 'CmdOrCtrl+0',
+          click: () => mainWindow && mainWindow.webContents.send('menu:zoomReset'),
+        },
+        {
+          label: 'Zoom In',
+          accelerator: 'CmdOrCtrl+=',
+          click: () => mainWindow && mainWindow.webContents.send('menu:zoomIn'),
+        },
+        {
+          label: 'Zoom Out',
+          accelerator: 'CmdOrCtrl+-',
+          click: () => mainWindow && mainWindow.webContents.send('menu:zoomOut'),
+        },
         { type: 'separator' },
         { role: 'togglefullscreen' },
       ],

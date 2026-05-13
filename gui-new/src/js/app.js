@@ -3,6 +3,15 @@
 if (!window.mdoAPI) throw new Error('mdoAPI not found');
 
 const $ = (sel, ctx = document) => ctx.querySelector(sel);
+const $$ = (sel, ctx = document) => [...ctx.querySelectorAll(sel)];
+
+const PREVIEW_ZOOM_STEPS = [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+
+function readStoredPreviewZoom() {
+  const raw = Number(localStorage.getItem('mdo-preview-zoom') || '1');
+  if (!Number.isFinite(raw)) return 1;
+  return Math.max(PREVIEW_ZOOM_STEPS[0], Math.min(PREVIEW_ZOOM_STEPS[PREVIEW_ZOOM_STEPS.length - 1], raw));
+}
 
 // ── Theme ─────────────────────────────────────────────────────
 
@@ -23,6 +32,11 @@ function toggleTheme() {
   localStorage.setItem('mdo-theme', next);
   const btn = $('#btn-theme-toggle');
   if (btn) btn.textContent = next === 'dark' ? '☀' : '🌙';
+  const tab = activeTab();
+  if (tab) {
+    if (editMode) readAllBlocks();
+    renderAllBlocks(tab.blocks);
+  }
 }
 
 // ── State ─────────────────────────────────────────────────────
@@ -33,6 +47,8 @@ const state = {
   previousTabId: null,
   currentFolder: null,
   fileStatus: 'clean',
+  rightPanelMode: localStorage.getItem('mdo-right-panel-mode') || 'outline',
+  previewZoom: readStoredPreviewZoom(),
   _saveTimer: null,
 };
 
@@ -44,12 +60,17 @@ const els = {
   previewEmpty: $('#preview-empty'),
   blockEditorInner: $('#block-editor-inner'),
   tabsBar: $('#tabs-bar'),
+  outlinePanel: $('#outline'),
+  outlineView: $('#outline-view'),
   outlineList: $('#outline-list'),
   outlineEmpty: $('#outline-empty'),
+  inspectorView: $('#inspector-view'),
+  inspectorContent: $('#inspector-content'),
   toolbarPath: $('#toolbar-path'),
   saveIndicator: $('#save-indicator'),
   statusBar: $('#block-status-bar'),
   dropOverlay: $('#drop-overlay'),
+  zoomReset: $('#btn-zoom-reset'),
 };
 
 // ── Tab Helpers ───────────────────────────────────────────────
@@ -67,6 +88,7 @@ function createTab(filePath, blocks) {
     blocks: blocks || [{ id: BlockEditor.nextId(), type: 'text', content: '', meta: {} }],
     archivePath: null,
     editableFile: filePath || null,
+    fileStat: null,
   };
   state.tabs.push(tab);
   return tab;
@@ -85,6 +107,7 @@ function switchTab(tabId) {
   renderAllBlocks(tab.blocks);
   updateOutline();
   updateStatusBar();
+  renderInspectorPanel();
   renderTabs();
   els.toolbarPath.textContent = tab.filePath ? tab.filePath.split('/').pop() : tab.fileName;
   updateToolbarButtons(tab.filePath);
@@ -92,6 +115,8 @@ function switchTab(tabId) {
   if (tab.filePath) {
     window._currentFileDir = tab.filePath.substring(0, tab.filePath.lastIndexOf('/'));
   }
+  applyPreviewZoom();
+  refreshActiveTabFileStat();
 }
 
 function closeTab(tabId) {
@@ -149,6 +174,180 @@ function renderTabs() {
   els.tabsBar.appendChild(add);
 }
 
+// ── Preview Controls ──────────────────────────────────────────
+
+function nextPreviewZoomStep(increasing) {
+  if (increasing) {
+    return PREVIEW_ZOOM_STEPS.find(step => step > state.previewZoom + 0.001) || PREVIEW_ZOOM_STEPS[PREVIEW_ZOOM_STEPS.length - 1];
+  }
+  return [...PREVIEW_ZOOM_STEPS].reverse().find(step => step < state.previewZoom - 0.001) || PREVIEW_ZOOM_STEPS[0];
+}
+
+function applyPreviewZoom() {
+  els.blockEditorInner.style.zoom = String(state.previewZoom);
+  if (els.zoomReset) {
+    els.zoomReset.textContent = Math.round(state.previewZoom * 100) + '%';
+  }
+}
+
+function setPreviewZoom(value) {
+  const clamped = Math.max(PREVIEW_ZOOM_STEPS[0], Math.min(PREVIEW_ZOOM_STEPS[PREVIEW_ZOOM_STEPS.length - 1], value));
+  state.previewZoom = clamped;
+  localStorage.setItem('mdo-preview-zoom', String(clamped));
+  applyPreviewZoom();
+}
+
+function zoomInPreview() {
+  setPreviewZoom(nextPreviewZoomStep(true));
+}
+
+function zoomOutPreview() {
+  setPreviewZoom(nextPreviewZoomStep(false));
+}
+
+function resetPreviewZoom() {
+  setPreviewZoom(1);
+}
+
+// ── Right Panel ───────────────────────────────────────────────
+
+function setRightPanelMode(mode) {
+  const nextMode = mode === 'inspector' ? 'inspector' : 'outline';
+  state.rightPanelMode = nextMode;
+  localStorage.setItem('mdo-right-panel-mode', nextMode);
+  els.outlineView.style.display = nextMode === 'outline' ? 'flex' : 'none';
+  els.inspectorView.style.display = nextMode === 'inspector' ? 'flex' : 'none';
+  els.outlineView.classList.toggle('panel-view-active', nextMode === 'outline');
+  els.inspectorView.classList.toggle('panel-view-active', nextMode === 'inspector');
+  $$('.right-panel-tab').forEach(btn => {
+    const active = btn.dataset.panel === nextMode;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+}
+
+function formatByteSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return '—';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unit = units[0];
+  for (let i = 0; i < units.length; i++) {
+    unit = units[i];
+    if (value < 1024 || i === units.length - 1) break;
+    value /= 1024;
+  }
+  return (value >= 100 || unit === 'B' ? Math.round(value) : value.toFixed(1)) + ' ' + unit;
+}
+
+function formatDateTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString();
+}
+
+function countMatches(text, pattern) {
+  if (!text) return 0;
+  const matches = String(text).match(pattern);
+  return matches ? matches.length : 0;
+}
+
+function documentTypeForTab(tab) {
+  const path = (tab?.filePath || tab?.editableFile || '').toLowerCase();
+  if (path.endsWith('.mdo')) return 'MDO Archive';
+  if (path.endsWith('.md') || path.endsWith('.markdown') || path.endsWith('.mdown')) return 'Markdown';
+  return 'Untitled';
+}
+
+function collectInspectorStats(tab) {
+  const blocks = tab?.blocks || [];
+  const combinedText = blocks.map(block => block.content || '').join('\n');
+  const linkCount = blocks.reduce((total, block) => {
+    return total + countMatches(block.content || '', /\[[^\]]+\]\([^)]+\)/g);
+  }, 0) + blocks.filter(block => ['bookmark', 'embed', 'page', 'file', 'pdf'].includes(block.type)).length;
+
+  return {
+    blockCount: blocks.length,
+    wordCount: combinedText.trim() ? combinedText.trim().split(/\s+/).length : 0,
+    characterCount: combinedText.length,
+    lineCount: combinedText ? combinedText.split('\n').length : 0,
+    headingCount: blocks.filter(block => ['heading-1', 'heading-2', 'heading-3'].includes(block.type)).length,
+    imageCount: blocks.filter(block => block.type === 'image').length,
+    equationCount: blocks.filter(block => block.type === 'equation').length,
+    mermaidCount: blocks.filter(block => block.type === 'mermaid').length,
+    linkCount,
+  };
+}
+
+function escapeInspector(value) {
+  return String(value == null ? '—' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderInspectorPanel() {
+  const tab = activeTab();
+  if (!tab) {
+    els.inspectorContent.innerHTML = '<div class="outline-empty"><span>No document metadata</span></div>';
+    return;
+  }
+
+  const stats = collectInspectorStats(tab);
+  const fileStat = tab.fileStat || null;
+  const rows = (entries) => entries.map(([label, value]) => {
+    return '<div class="inspector-row"><span class="inspector-label">' + label + '</span><span class="inspector-value">' + value + '</span></div>';
+  }).join('');
+
+  els.inspectorContent.innerHTML = [
+    '<div class="inspector-section">',
+    '<div class="inspector-section-title">File</div>',
+    '<div class="inspector-card">',
+    rows([
+      ['Name', escapeInspector(tab.fileName || 'Untitled')],
+      ['Type', escapeInspector(documentTypeForTab(tab))],
+      ['Path', escapeInspector(tab.filePath || tab.editableFile || 'Not saved')],
+      ['Size', escapeInspector(formatByteSize(fileStat?.size))],
+      ['Modified', escapeInspector(formatDateTime(fileStat?.mtime))],
+    ]),
+    '</div>',
+    '</div>',
+    '<div class="inspector-section">',
+    '<div class="inspector-section-title">Document</div>',
+    '<div class="inspector-card">',
+    rows([
+      ['Blocks', String(stats.blockCount)],
+      ['Words', String(stats.wordCount)],
+      ['Characters', String(stats.characterCount)],
+      ['Lines', String(stats.lineCount)],
+      ['Headings', String(stats.headingCount)],
+      ['Links', String(stats.linkCount)],
+      ['Images', String(stats.imageCount)],
+      ['Equations', String(stats.equationCount)],
+      ['Mermaid', String(stats.mermaidCount)],
+    ]),
+    '</div>',
+    '</div>',
+  ].join('');
+}
+
+async function refreshActiveTabFileStat() {
+  const tab = activeTab();
+  if (!tab) return;
+  const filePath = tab.editableFile || tab.filePath;
+  if (!filePath) {
+    tab.fileStat = null;
+    renderInspectorPanel();
+    return;
+  }
+  const stat = await window.mdoAPI.stat(filePath);
+  if (activeTab()?.id !== tab.id) return;
+  tab.fileStat = stat && !stat.error ? stat : null;
+  renderInspectorPanel();
+}
+
 // ── Blocks Engine ─────────────────────────────────────────────
 
 let editMode = false;
@@ -164,6 +363,12 @@ function toggleEditMode() {
   }
   if (tab) {
     renderAllBlocks(tab.blocks);
+  }
+  if ($('#find-bar').style.display !== 'none') {
+    $('#replace-input').disabled = !editMode;
+    $('#btn-replace-one').disabled = !editMode;
+    $('#btn-replace-all').disabled = !editMode;
+    doFind();
   }
 }
 
@@ -184,6 +389,7 @@ function renderAllBlocks(blocks) {
     els.blockEditorInner.appendChild(blockEl);
     if (editMode) showAddBlockButton(i + 1);
   }
+  applyPreviewZoom();
   updateOutline();
 }
 
@@ -578,6 +784,7 @@ function updateStatusBar() {
   els.statusBar.textContent = count + ' blocks  ·  ' + words + ' words  ·  ' + headings + ' headings';
   els.statusBar.style.display = count > 0 ? '' : 'none';
   updateSaveIndicator();
+  renderInspectorPanel();
 }
 
 function updateSaveIndicator() {
@@ -663,6 +870,13 @@ $('#btn-theme-toggle').addEventListener('click', toggleTheme);
 $('#btn-export-html').addEventListener('click', exportHTML);
 $('#btn-export-pdf').addEventListener('click', exportPDF);
 $('#btn-export-docx').addEventListener('click', exportDOCX);
+$('#btn-search').addEventListener('click', openFindBar);
+$('#btn-zoom-in').addEventListener('click', zoomInPreview);
+$('#btn-zoom-out').addEventListener('click', zoomOutPreview);
+$('#btn-zoom-reset').addEventListener('click', resetPreviewZoom);
+$$('.right-panel-tab').forEach(btn => {
+  btn.addEventListener('click', () => setRightPanelMode(btn.dataset.panel));
+});
 
 function newDocument() {
   const tab = createTab(null, [{ id: BlockEditor.nextId(), type: 'text', content: '', meta: {} }]);
@@ -855,6 +1069,7 @@ async function saveCurrentFile() {
   els.toolbarPath.textContent = tab.fileName;
   updateToolbarButtons(savePath);
   renderTabs();
+  refreshActiveTabFileStat();
   const parent = savePath.substring(0, savePath.lastIndexOf('/'));
   if (parent && parent !== state.currentFolder) navigateFolder(parent);
 }
@@ -982,9 +1197,30 @@ document.addEventListener('keydown', (e) => {
     if (!editMode) return;
     handlePaste(e);
   }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g') {
+    e.preventDefault();
+    openFindBar();
+    navigateFind(e.shiftKey ? -1 : 1);
+    return;
+  }
   if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
     e.preventDefault();
     openFindBar();
+    return;
+  }
+  if ((e.metaKey || e.ctrlKey) && (e.key === '=' || e.key === '+')) {
+    e.preventDefault();
+    zoomInPreview();
+    return;
+  }
+  if ((e.metaKey || e.ctrlKey) && (e.key === '-' || e.key === '_')) {
+    e.preventDefault();
+    zoomOutPreview();
+    return;
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key === '0') {
+    e.preventDefault();
+    resetPreviewZoom();
     return;
   }
   if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -1143,9 +1379,21 @@ function initResizers() {
 
 // ── Menu Events ───────────────────────────────────────────────
 
-window.mdoAPI.onMenuNew(() => newDocument());
-window.mdoAPI.onMenuOpen(() => $('#btn-open').click());
-window.mdoAPI.onMenuSave(() => saveCurrentFile());
+window.mdoAPI.onMenuNew?.(() => newDocument());
+window.mdoAPI.onMenuOpen?.(() => $('#btn-open').click());
+window.mdoAPI.onMenuSave?.(() => saveCurrentFile());
+window.mdoAPI.onMenuFind?.(() => openFindBar());
+window.mdoAPI.onMenuFindNext?.(() => {
+  openFindBar();
+  navigateFind(1);
+});
+window.mdoAPI.onMenuFindPrev?.(() => {
+  openFindBar();
+  navigateFind(-1);
+});
+window.mdoAPI.onMenuZoomIn?.(() => zoomInPreview());
+window.mdoAPI.onMenuZoomOut?.(() => zoomOutPreview());
+window.mdoAPI.onMenuZoomReset?.(() => resetPreviewZoom());
 
 // ── Right-click Context Menu ──────────────────────────────────
 
@@ -1258,6 +1506,9 @@ var findIndex = -1;
 function openFindBar() {
   var bar = $('#find-bar');
   bar.style.display = 'flex';
+  $('#replace-input').disabled = !editMode;
+  $('#btn-replace-one').disabled = !editMode;
+  $('#btn-replace-all').disabled = !editMode;
   $('#find-input').focus();
   $('#find-input').select();
   if (!$('#find-input')._bound) {
@@ -1276,24 +1527,42 @@ function openFindBar() {
       if (e.key === 'Escape') closeFindBar();
     });
   }
+  if ($('#find-input').value) doFind();
 }
 
 function closeFindBar() { $('#find-bar').style.display = 'none'; clearFindHighlights(); }
+
+function findTargets() {
+  var blocks = els.blockEditorInner.querySelectorAll('.block');
+  var targets = [];
+  blocks.forEach(function(block) {
+    if (editMode) {
+      var editables = block.querySelectorAll('.equation-source, .mermaid-source, .callout-body, .image-caption, .toggle-content, .toggle-children, .column-block, td[contenteditable="true"], th[contenteditable="true"], .block-content[contenteditable="true"]');
+      if (editables.length) {
+        editables.forEach(function(editable) { targets.push(editable); });
+        return;
+      }
+    }
+    var content = block.querySelector('.block-content');
+    if (content) {
+      targets.push(content);
+      return;
+    }
+  });
+  return targets;
+}
 
 function doFind() {
   clearFindHighlights(); findMatches = []; findIndex = -1;
   var query = $('#find-input').value;
   if (!query) { $('#find-count').textContent = ''; return; }
-  var blocks = els.blockEditorInner.querySelectorAll('.block');
   var qLower = query.toLowerCase();
-  blocks.forEach(function(block) {
-    var editables = block.querySelectorAll('[contenteditable="true"]');
-    editables.forEach(function(ed) {
-      var text = ed.textContent || ''; var idx = -1;
-      while ((idx = text.toLowerCase().indexOf(qLower, idx + 1)) !== -1) {
-        findMatches.push({ block: block, editable: ed, index: idx, length: query.length });
-      }
-    });
+  findTargets().forEach(function(target) {
+    var text = target.textContent || '';
+    var idx = -1;
+    while ((idx = text.toLowerCase().indexOf(qLower, idx + 1)) !== -1) {
+      findMatches.push({ editable: target, index: idx, length: query.length });
+    }
   });
   $('#find-count').textContent = findMatches.length ? (findMatches.length + ' matches') : 'No matches';
   if (findMatches.length > 0) navigateFind(1);
@@ -1343,6 +1612,7 @@ function navigateFind(direction) {
 function clearFindHighlights() { var sel = window.getSelection(); if (sel) sel.removeAllRanges(); }
 
 function doReplaceOne() {
+  if (!editMode) return;
   if (findIndex < 0 || findIndex >= findMatches.length) return;
   var replaceText = $('#replace-input').value || '';
   var m = findMatches[findIndex];
@@ -1355,6 +1625,7 @@ function doReplaceOne() {
 }
 
 function doReplaceAll() {
+  if (!editMode) return;
   if (!findMatches.length) return;
   var replaceText = $('#replace-input').value || '';
   for (var i = findMatches.length - 1; i >= 0; i--) {
@@ -1413,6 +1684,8 @@ function init() {
   }
   var themeBtn = $('#btn-theme-toggle');
   if (themeBtn) themeBtn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀' : '🌙';
+  setRightPanelMode(state.rightPanelMode);
+  applyPreviewZoom();
   newDocument();
 }
 

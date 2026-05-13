@@ -85,6 +85,8 @@ a:hover{text-decoration:underline}
         var lang = meta.language ? '<div style="position:absolute;top:8px;right:12px;font-size:11px;color:#aeaeb2;text-transform:uppercase;font-family:sans-serif">' + escapeHtml(meta.language) + '</div>' : '';
         return '<div class="block-content code-block" style="position:relative">' + lang + escapeHtml(content) + '</div>';
       }
+      case 'mermaid':
+        return '<div class="block-content code-block" style="position:relative"><div style="position:absolute;top:8px;right:12px;font-size:11px;color:#aeaeb2;text-transform:uppercase;font-family:sans-serif">mermaid</div>' + escapeHtml(content) + '</div>';
       case 'divider':
         return '<div class="block-content divider"></div>';
       case 'table':
@@ -134,6 +136,16 @@ a:hover{text-decoration:underline}
         if (meta.url) return '<div class="block-content embed-block"><iframe src="' + escapeAttr(meta.url) + '" style="width:100%;min-height:400px;border:1px solid #e8e8ed;border-radius:8px"></iframe></div>';
         return '<div class="block-content embed-block"></div>';
       case 'equation':
+        if (window.katex && typeof window.katex.renderToString === 'function') {
+          try {
+            return '<div class="block-content equation-block">' + window.katex.renderToString(content || '', {
+              displayMode: true,
+              output: 'htmlAndMathml',
+              strict: 'ignore',
+              throwOnError: false,
+            }) + '</div>';
+          } catch (_) {}
+        }
         return '<div class="block-content equation-block">' + escapeHtml(content || '') + '</div>';
       case 'page':
         return '<div class="block-content page-block"><span class="page-icon">▦</span><span>' + escapeHtml(content || 'Untitled Page') + '</span></div>';

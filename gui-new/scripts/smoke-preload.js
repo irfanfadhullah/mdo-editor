@@ -107,6 +107,12 @@ window.mdoAPI = {
   onMenuNew: () => {},
   onMenuOpen: () => {},
   onMenuSave: () => {},
+  onMenuFind: () => {},
+  onMenuFindNext: () => {},
+  onMenuFindPrev: () => {},
+  onMenuZoomIn: () => {},
+  onMenuZoomOut: () => {},
+  onMenuZoomReset: () => {},
 
   notifyDocumentSaved: (filePath) => {
     window.__savedNotifications.push(filePath);

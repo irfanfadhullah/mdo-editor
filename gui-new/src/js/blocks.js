@@ -76,6 +76,7 @@ BlockEditor.TYPES = [
   { id: 'embed',         label: 'Embed',           icon: '🌐',     category: 'media',      shortcut: 'embed' },
   { id: 'bookmark',      label: 'Bookmark',        icon: '🔖',     category: 'media',      shortcut: 'link' },
   { id: 'equation',      label: 'Equation',        icon: '𝑓',      category: 'technical',  shortcut: 'math' },
+  { id: 'mermaid',       label: 'Mermaid',         icon: '◈',      category: 'technical',  shortcut: 'mermaid' },
   { id: 'pdf',           label: 'PDF',             icon: '📋',     category: 'media',      shortcut: 'pdf' },
 ];
 
@@ -142,6 +143,7 @@ BlockEditor.contentClassForType = function(type) {
     file: 'file-block',
     pdf: 'pdf-block file-block',
     equation: 'equation-block',
+    mermaid: 'mermaid-block',
     page: 'page-block',
   };
   return [type, aliases[type]].filter(Boolean).join(' ');
@@ -181,6 +183,11 @@ BlockEditor.defaultBlockData = function(type = 'text', content = '', meta = {}) 
       break;
     case 'divider':
       block.content = '';
+      break;
+    case 'mermaid':
+      if (!block.content) {
+        block.content = 'graph TD\n  A[Start] --> B[Finish]';
+      }
       break;
   }
 
@@ -542,7 +549,13 @@ BlockEditor.parseMarkdown = function(markdown) {
         i++;
       }
       i++; // skip closing ```
-      blocks.push({ id: BlockEditor.nextId(), type: 'code', content: codeContent, meta: { language: lang } });
+      if (/^mermaid$/i.test(lang)) {
+        blocks.push({ id: BlockEditor.nextId(), type: 'mermaid', content: codeContent.trim() });
+      } else if (/^(math|katex)$/i.test(lang)) {
+        blocks.push({ id: BlockEditor.nextId(), type: 'equation', content: codeContent.trim() });
+      } else {
+        blocks.push({ id: BlockEditor.nextId(), type: 'code', content: codeContent, meta: { language: lang } });
+      }
       continue;
     }
 
@@ -817,6 +830,11 @@ BlockEditor.serializeMarkdown = function(blocks) {
         lines.push(b.content || '');
         lines.push('$$');
         break;
+      case 'mermaid':
+        lines.push('```mermaid');
+        lines.push(b.content || '');
+        lines.push('```');
+        break;
       case 'pdf':
         lines.push('[' + (b.content || 'PDF') + '](' + (b.meta?.src || '') + ')');
         break;
@@ -923,7 +941,33 @@ function escapeHtml(text) {
     .replace(/'/g, '&#39;');
 }
 
-function renderLatexInline(source) {
+function hasKatexRenderer() {
+  return !!(window.katex && typeof window.katex.renderToString === 'function');
+}
+
+function hasMermaidRenderer() {
+  return !!(window.mermaid && typeof window.mermaid.render === 'function');
+}
+
+function currentMermaidTheme() {
+  return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default';
+}
+
+function ensureMermaidInitialized() {
+  if (!hasMermaidRenderer()) return false;
+  const theme = currentMermaidTheme();
+  if (window.__mdoMermaidTheme === theme) return true;
+  window.mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'loose',
+    suppressErrorRendering: true,
+    theme,
+  });
+  window.__mdoMermaidTheme = theme;
+  return true;
+}
+
+function renderLatexInlineFallback(source) {
   const commandMap = {
     alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', theta: 'θ',
     lambda: 'λ', mu: 'μ', pi: 'π', sigma: 'σ', phi: 'φ', omega: 'ω',
@@ -949,13 +993,13 @@ function renderLatexInline(source) {
   return html;
 }
 
-function renderLatexDisplay(latex) {
+function renderLatexDisplayFallback(latex) {
   if (!latex) return '<span class="latex-empty">Type LaTeX equation...</span>';
   const matrices = [];
   const withPlaceholders = String(latex).replace(/\\begin\{([bp]?matrix)\}([\s\S]*?)\\end\{\1\}/g, (_, matrixType, body) => {
     const rows = body.split(/\\\\/).map(row => row.trim()).filter(Boolean);
     const table = rows.map(row => {
-      const cells = row.split('&').map(cell => '<td>' + renderLatexInline(cell.trim()) + '</td>').join('');
+      const cells = row.split('&').map(cell => '<td>' + renderLatexInlineFallback(cell.trim()) + '</td>').join('');
       return '<tr>' + cells + '</tr>';
     }).join('');
     const bracketClass = matrixType === 'pmatrix' ? ' paren' : matrixType === 'matrix' ? ' plain' : '';
@@ -965,11 +1009,159 @@ function renderLatexDisplay(latex) {
     return token;
   });
 
-  let html = renderLatexInline(withPlaceholders);
+  let html = renderLatexInlineFallback(withPlaceholders);
   for (const matrix of matrices) {
     html = html.replace(matrix.token, matrix.html);
   }
   return html;
+}
+
+function renderLatexInline(source) {
+  if (!source) return '';
+  if (!hasKatexRenderer()) return renderLatexInlineFallback(source);
+  try {
+    return window.katex.renderToString(source, {
+      displayMode: false,
+      output: 'htmlAndMathml',
+      strict: 'ignore',
+      throwOnError: false,
+    });
+  } catch (_) {
+    return renderLatexInlineFallback(source);
+  }
+}
+
+function renderLatexDisplay(latex) {
+  if (!latex) return '<span class="latex-empty">Type LaTeX equation...</span>';
+  if (!hasKatexRenderer()) return renderLatexDisplayFallback(latex);
+  try {
+    return window.katex.renderToString(latex, {
+      displayMode: true,
+      output: 'htmlAndMathml',
+      strict: 'ignore',
+      throwOnError: false,
+    });
+  } catch (_) {
+    return renderLatexDisplayFallback(latex);
+  }
+}
+
+function splitInlineMathSegments(text) {
+  const segments = [];
+  const source = String(text || '');
+  let cursor = 0;
+  let buffer = '';
+
+  while (cursor < source.length) {
+    const ch = source[cursor];
+    if (ch === '\\' && cursor + 1 < source.length) {
+      buffer += source.slice(cursor, cursor + 2);
+      cursor += 2;
+      continue;
+    }
+    if (ch !== '$' || source[cursor + 1] === '$') {
+      buffer += ch;
+      cursor += 1;
+      continue;
+    }
+
+    let end = cursor + 1;
+    let found = -1;
+    while (end < source.length) {
+      if (source[end] === '\\' && end + 1 < source.length) {
+        end += 2;
+        continue;
+      }
+      if (source[end] === '$') {
+        found = end;
+        break;
+      }
+      if (source[end] === '\n') break;
+      end += 1;
+    }
+
+    if (found === -1) {
+      buffer += '$';
+      cursor += 1;
+      continue;
+    }
+
+    const latex = source.slice(cursor + 1, found);
+    if (!latex.trim()) {
+      buffer += '$$';
+      cursor = found + 1;
+      continue;
+    }
+
+    if (buffer) {
+      segments.push({ type: 'text', value: buffer });
+      buffer = '';
+    }
+    segments.push({ type: 'math', value: latex });
+    cursor = found + 1;
+  }
+
+  if (buffer) {
+    segments.push({ type: 'text', value: buffer });
+  }
+  return segments;
+}
+
+function renderTextSegment(text) {
+  if (!text) return '';
+  let html = escapeHtml(text);
+  html = formatStars(html);
+  html = html
+    .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
+    .replace(/~~(.+?)~~/g, '<del>$1</del>')
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function(m, alt, url) {
+      var src = url.trim();
+      return '<img src="' + src + '" alt="' + alt + '" style="max-height:1.5em;max-width:100%;vertical-align:middle;border-radius:3px;">';
+    })
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/\n/g, '<br>');
+  return html;
+}
+
+function renderInlineMathSegment(latex, editMode) {
+  if (editMode) {
+    return '<code class="inline-code inline-math-source">$' + escapeHtml(latex) + '$</code>';
+  }
+  return '<span class="inline-math" data-latex="' + escapeHtml(latex) + '">' + renderLatexInline(latex) + '</span>';
+}
+
+let mermaidRenderSequence = 0;
+
+async function renderMermaidPreview(previewEl, source) {
+  const diagram = String(source || '').trim();
+  previewEl.dataset.renderToken = String((Number(previewEl.dataset.renderToken || '0') || 0) + 1);
+  const token = previewEl.dataset.renderToken;
+
+  if (!diagram) {
+    previewEl.innerHTML = '<div class="mermaid-empty">Type Mermaid diagram...</div>';
+    return;
+  }
+
+  if (!ensureMermaidInitialized()) {
+    previewEl.innerHTML = '<pre class="mermaid-source">' + escapeHtml(diagram) + '</pre>';
+    return;
+  }
+
+  previewEl.innerHTML = '<div class="mermaid-rendering">Rendering diagram...</div>';
+
+  try {
+    const renderId = 'mdo-mermaid-' + (++mermaidRenderSequence);
+    const rendered = await window.mermaid.render(renderId, diagram);
+    if (previewEl.dataset.renderToken !== token) return;
+    previewEl.innerHTML = rendered.svg;
+    if (typeof rendered.bindFunctions === 'function') {
+      rendered.bindFunctions(previewEl);
+    }
+  } catch (error) {
+    if (previewEl.dataset.renderToken !== token) return;
+    const message = error && error.message ? error.message : String(error);
+    previewEl.innerHTML = '<div class="mermaid-error"><strong>Mermaid error</strong><pre>' + escapeHtml(message) + '</pre></div>';
+  }
 }
 
 // ── Block → DOM Renderer ─────────────────────────────────────
@@ -998,7 +1190,7 @@ BlockEditor.renderBlock = function(block, isEditable = true) {
       content.contentEditable = 'true';
       content.dataset.placeholder = 'Type / for commands…';
       content.setAttribute('spellcheck', 'true');
-      content.innerHTML = renderInlineContent(block.content);
+      content.innerHTML = renderInlineContent(block.content, { editMode: ed });
       break;
 
     case 'heading-1':
@@ -1007,7 +1199,7 @@ BlockEditor.renderBlock = function(block, isEditable = true) {
       content.contentEditable = 'true';
       content.dataset.placeholder = block.type.replace('-', ' ') + '…';
       content.setAttribute('spellcheck', 'true');
-      content.innerHTML = renderInlineContent(block.content);
+      content.innerHTML = renderInlineContent(block.content, { editMode: ed });
       break;
 
     case 'bulleted-list':
@@ -1029,7 +1221,7 @@ BlockEditor.renderBlock = function(block, isEditable = true) {
         });
         content.appendChild(cb);
       }
-      content.insertAdjacentHTML('beforeend', renderInlineContent(block.content));
+      content.insertAdjacentHTML('beforeend', renderInlineContent(block.content, { editMode: ed }));
       if (block.type === 'todo-list' && block.meta?.checked) {
         content.classList.add('checked');
       }
@@ -1039,7 +1231,7 @@ BlockEditor.renderBlock = function(block, isEditable = true) {
       content.contentEditable = 'true';
       content.dataset.placeholder = 'Quote…';
       content.setAttribute('spellcheck', 'true');
-      content.innerHTML = renderInlineContent(block.content);
+      content.innerHTML = renderInlineContent(block.content, { editMode: ed });
       break;
 
     case 'callout':
@@ -1053,7 +1245,7 @@ BlockEditor.renderBlock = function(block, isEditable = true) {
         body.contentEditable = 'true';
         body.dataset.placeholder = 'Callout content…';
         body.setAttribute('spellcheck', 'true');
-        body.innerHTML = renderInlineContent(block.content);
+        body.innerHTML = renderInlineContent(block.content, { editMode: ed });
         content.appendChild(icon);
         content.appendChild(body);
       }
@@ -1282,6 +1474,34 @@ BlockEditor.renderBlock = function(block, isEditable = true) {
       }
       break;
 
+    case 'mermaid':
+      content.contentEditable = 'false';
+      content.dataset.placeholder = 'Type Mermaid diagram…';
+      content.setAttribute('spellcheck', 'false');
+      content.dataset.mermaid = block.content || '';
+      {
+        const preview = document.createElement('div');
+        preview.className = 'mermaid-preview';
+        content.appendChild(preview);
+        renderMermaidPreview(preview, block.content || '');
+
+        if (ed) {
+          const source = document.createElement('div');
+          source.className = 'mermaid-source';
+          source.contentEditable = 'true';
+          source.dataset.placeholder = 'Mermaid source, e.g. graph TD\n  A --> B';
+          source.setAttribute('spellcheck', 'false');
+          source.textContent = block.content || '';
+          source.addEventListener('input', () => {
+            content.dataset.mermaid = source.innerText.trim();
+            renderMermaidPreview(preview, content.dataset.mermaid);
+            content.closest('.block-editor')?.dispatchEvent(new CustomEvent('block-changed'));
+          });
+          content.appendChild(source);
+        }
+      }
+      break;
+
     case 'page':
       content.contentEditable = 'false';
       {
@@ -1384,27 +1604,16 @@ function formatStars(text) {
   return out;
 }
 
-function renderInlineContent(text) {
+function renderInlineContent(text, options = {}) {
   if (!text) return '';
-  var html = text
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  html = formatStars(html);
-  html = html
-    // Inline math $...$ → styled span
-    .replace(/\$\$?(.+?)\$\$?/g, '<code class="inline-code" style="font-style:italic;">$1</code>')
-    // Inline code `...`
-    .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
-    // Strikethrough ~~...~~
-    .replace(/~~(.+?)~~/g, '<del>$1</del>')
-    // Images ![alt](url) — inline
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, function(m, alt, url) {
-      var src = url.trim();
-      return '<img src="' + src + '" alt="' + alt + '" style="max-height:1.5em;max-width:100%;vertical-align:middle;border-radius:3px;">';
-    })
-    // Links [text](url)
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
-    .replace(/\n/g, '<br>');
-  return html;
+  const segments = splitInlineMathSegments(text);
+  if (!segments.length) return renderTextSegment(text);
+  return segments.map(segment => {
+    if (segment.type === 'math') {
+      return renderInlineMathSegment(segment.value, !!options.editMode);
+    }
+    return renderTextSegment(segment.value);
+  }).join('');
 }
 
 // ── Extract block content from DOM ────────────────────────────
@@ -1425,7 +1634,9 @@ BlockEditor.readBlock = function(blockEl) {
     case 'heading-3':
     case 'bulleted-list':
     case 'numbered-list':
-      block.content = contentEl.innerText.trim();
+      block.content = contentEl.contentEditable === 'true'
+        ? contentEl.innerText.trim()
+        : (stored.content || '');
       break;
 
     case 'todo-list':
@@ -1433,18 +1644,24 @@ BlockEditor.readBlock = function(blockEl) {
         const cb = contentEl.querySelector('.todo-checkbox');
         block.meta = block.meta || {};
         block.meta.checked = cb?.classList.contains('checked') || false;
-        block.content = contentEl.innerText.trim();
+        block.content = contentEl.contentEditable === 'true'
+          ? contentEl.innerText.trim()
+          : (stored.content || '');
       }
       break;
 
     case 'quote':
-      block.content = contentEl.innerText.trim();
+      block.content = contentEl.contentEditable === 'true'
+        ? contentEl.innerText.trim()
+        : (stored.content || '');
       break;
 
     case 'callout':
       {
         const body = contentEl.querySelector('.callout-body');
-        block.content = body ? body.innerText.trim() : '';
+        block.content = body && body.contentEditable === 'true'
+          ? body.innerText.trim()
+          : (stored.content || '');
         const icon = contentEl.querySelector('.callout-icon');
         block.meta = block.meta || {};
         block.meta.icon = icon ? icon.textContent : '💡';
@@ -1533,6 +1750,15 @@ BlockEditor.readBlock = function(blockEl) {
         block.content = source
           ? source.innerText.trim()
           : (contentEl.dataset.latex || block.content || '').trim();
+      }
+      break;
+
+    case 'mermaid':
+      {
+        const source = contentEl.querySelector('.mermaid-source');
+        block.content = source
+          ? source.innerText.trim()
+          : (contentEl.dataset.mermaid || block.content || '').trim();
       }
       break;
 

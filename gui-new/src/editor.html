@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob: file:; img-src * data: file: blob:; media-src * data: file: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-src 'self' https: http: data: blob: file:;">
   <title>Editor — MDO Viewer</title>
+  <link rel="stylesheet" href="../node_modules/katex/dist/katex.min.css">
   <link rel="stylesheet" href="styles/main.css">
   <link rel="stylesheet" href="styles/blocks.css">
 </head>
@@ -71,10 +72,14 @@
       <div class="block-picker-section">
         <div class="block-picker-label">Technical</div>
         <div class="block-picker-item" data-block="equation">𝑓 Equation</div>
+        <div class="block-picker-item" data-block="mermaid">◈ Mermaid</div>
       </div>
     </div>
   </div>
 
+  <script src="../node_modules/katex/dist/katex.min.js"></script>
+  <script src="../node_modules/katex/dist/contrib/copy-tex.min.js"></script>
+  <script src="../node_modules/mermaid/dist/mermaid.min.js"></script>
   <script src="js/blocks.js"></script>
   <script src="js/editor.js"></script>
 </body>

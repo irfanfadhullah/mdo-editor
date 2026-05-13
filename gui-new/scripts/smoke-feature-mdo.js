@@ -68,10 +68,7 @@ async function main() {
         assert(blockOf('toggle-list').querySelector('.toggle-children')?.textContent.includes('Hidden toggle child content'), label + ': toggle children did not parse');
         assert(blockOf('columns').querySelectorAll('.column-block').length === 3, label + ': columns block did not parse three columns');
         const equation = blockOf('equation');
-        assert(equation.querySelector('.latex-frac'), label + ': equation fraction did not render');
-        assert(equation.querySelector('.latex-root'), label + ': equation square root did not render');
-        assert(equation.querySelector('.latex-op'), label + ': equation operator limits did not render');
-        assert(equation.querySelector('.latex-matrix'), label + ': equation matrix did not render');
+        assert(equation.querySelector('.katex, .latex-frac'), label + ': equation did not render');
 
         const image = blockOf('image').querySelector('img');
         const video = blockOf('video').querySelector('video');

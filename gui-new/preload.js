@@ -29,6 +29,12 @@ contextBridge.exposeInMainWorld('mdoAPI', {
   onMenuNew: (callback) => ipcRenderer.on('menu:new', () => callback()),
   onMenuOpen: (callback) => ipcRenderer.on('menu:open', () => callback()),
   onMenuSave: (callback) => ipcRenderer.on('menu:save', () => callback()),
+  onMenuFind: (callback) => ipcRenderer.on('menu:find', () => callback()),
+  onMenuFindNext: (callback) => ipcRenderer.on('menu:findNext', () => callback()),
+  onMenuFindPrev: (callback) => ipcRenderer.on('menu:findPrev', () => callback()),
+  onMenuZoomIn: (callback) => ipcRenderer.on('menu:zoomIn', () => callback()),
+  onMenuZoomOut: (callback) => ipcRenderer.on('menu:zoomOut', () => callback()),
+  onMenuZoomReset: (callback) => ipcRenderer.on('menu:zoomReset', () => callback()),
 
   notifyDocumentSaved: (filePath) => ipcRenderer.send('document:saved', filePath),
 });

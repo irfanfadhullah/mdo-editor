@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob: file:; img-src * data: file: blob:; media-src * data: file: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-src 'self' https: http: data: blob: file:;">
   <title>MDO Viewer</title>
+  <link rel="stylesheet" href="../node_modules/katex/dist/katex.min.css">
   <link rel="stylesheet" href="styles/main.css">
   <link rel="stylesheet" href="styles/blocks.css">
 </head>
@@ -38,6 +39,16 @@
         <button class="toolbar-btn" id="btn-export-docx" title="Export DOCX">
           <svg viewBox="0 0 24 24" style="width:15px;height:15px;"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>
         </button>
+      </div>
+      <div class="toolbar-group">
+        <button class="toolbar-btn" id="btn-search" title="Search">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </button>
+        <div class="toolbar-zoom" title="Preview Zoom">
+          <button class="toolbar-btn toolbar-btn-text" id="btn-zoom-out" title="Zoom Out">A-</button>
+          <button class="toolbar-zoom-level" id="btn-zoom-reset" title="Actual Size">100%</button>
+          <button class="toolbar-btn toolbar-btn-text" id="btn-zoom-in" title="Zoom In">A+</button>
+        </div>
       </div>
       <div class="toolbar-spacer"></div>
       <div class="theme-toggle-btn" id="btn-theme-toggle" title="Toggle Dark Mode" style="margin-right:8px;">🌙</div>
@@ -99,11 +110,23 @@
       <!-- Outline: Document Headlines -->
       <div class="outline" id="outline">
         <div class="outline-header">
-          <span class="outline-title">Outline</span>
+          <div class="right-panel-tabs" role="tablist" aria-label="Document panel">
+            <button class="right-panel-tab active" id="tab-outline" data-panel="outline" role="tab" aria-selected="true">Outline</button>
+            <button class="right-panel-tab" id="tab-inspector" data-panel="inspector" role="tab" aria-selected="false">Inspector</button>
+          </div>
         </div>
-        <div class="outline-list" id="outline-list">
-          <div class="outline-empty" id="outline-empty">
-            <span>No headings</span>
+        <div class="panel-view panel-view-active" id="outline-view">
+          <div class="outline-list" id="outline-list">
+            <div class="outline-empty" id="outline-empty">
+              <span>No headings</span>
+            </div>
+          </div>
+        </div>
+        <div class="panel-view" id="inspector-view" style="display:none;">
+          <div class="inspector-content" id="inspector-content">
+            <div class="outline-empty">
+              <span>No document metadata</span>
+            </div>
           </div>
         </div>
       </div>
@@ -113,6 +136,9 @@
     <div class="drop-overlay" id="drop-overlay"></div>
   </div>
 
+  <script src="../node_modules/katex/dist/katex.min.js"></script>
+  <script src="../node_modules/katex/dist/contrib/copy-tex.min.js"></script>
+  <script src="../node_modules/mermaid/dist/mermaid.min.js"></script>
   <script src="js/blocks.js"></script>
   <script src="js/export-html.js"></script>
   <script src="js/undo.js"></script>

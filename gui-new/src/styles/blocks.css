@@ -615,6 +615,93 @@ html[data-theme="light"] .block-content.callout {
   content: attr(data-placeholder);
 }
 
+.inline-math {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+.inline-math-source {
+  font-style: italic;
+}
+
+.katex-display {
+  margin: 0.25em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.block-content .katex {
+  font-size: 1em;
+}
+
+/* Keep math readable inside RTL documents and narrow cards. */
+.block-content .katex,
+.block-content .katex-display {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.block-content.mermaid-block {
+  padding: 12px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.mermaid-preview {
+  display: block;
+  min-height: 64px;
+  overflow-x: auto;
+}
+
+.mermaid-preview svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.mermaid-source {
+  margin-top: 10px;
+  padding: 8px 10px;
+  min-height: 72px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.mermaid-source:empty::before,
+.mermaid-empty,
+.mermaid-rendering {
+  color: var(--text-placeholder);
+}
+
+.mermaid-source:empty::before {
+  content: attr(data-placeholder);
+}
+
+.mermaid-error {
+  color: #b42318;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.mermaid-error pre {
+  margin-top: 6px;
+  padding: 10px;
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: inherit;
+  font-family: var(--font-mono);
+}
+
 .latex-frac {
   display: inline-flex;
   flex-direction: column;
